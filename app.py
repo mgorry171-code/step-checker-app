@@ -1,6 +1,6 @@
 import streamlit as st
 import sympy
-from sympy import symbols, sympify, solve, Eq, latex
+from sympy import symbols, sympify, solve, Eq, latex, Tuple
 
 # --- SETUP SESSION STATE ---
 if 'line_prev' not in st.session_state:
@@ -14,7 +14,7 @@ def add_to_curr(text_to_add):
 
 def pretty_print(math_str):
     try:
-        # Handle +/- manually for display if user tries to type it
+        # Visual fix for +/-
         clean_str = math_str.replace("+/-", "±")
         if "=" in clean_str:
             lhs, rhs = clean_str.split("=")
@@ -30,8 +30,17 @@ def validate_step(line_prev_str, line_curr_str):
     x = symbols('x')
     try:
         def parse_eq(eq_str):
-            # Pre-clean known human syntax issues
-            eq_str = eq_str.replace("^", "**") # Allow using ^ for exponents
+            # 1. Handle "+/-" by expanding it manually
+            # If user types "x = +/- 4", we treat it as the set {-4, 4}
+            if "+/-" in eq_str:
+                parts = eq_str.split("+/-")
+                val = sympify(parts[1])
+                # Return an equation equal to a Set of values {-val, val}
+                # (Note: This is a hack to force 'solve' to see both values)
+                return Eq(x**2, val**2) 
+                
+            # 2. Standard Parsing
+            eq_str = eq_str.replace("^", "**") 
             
             if "=" in eq_str:
                 lhs, rhs = eq_str.split("=")
@@ -48,19 +57,28 @@ def validate_step(line_prev_str, line_curr_str):
         sol1 = solve(eq1, x)
         sol2 = solve(eq2, x)
         
-        # --- THE NEW LOGIC ---
+        # --- FLATTEN LOGIC (The Fix for '4, -4') ---
+        # If sol2 looks like [(4, -4)], it's a tuple (coordinate).
+        # We need to flatten it into [-4, 4]
+        flat_sol2 = set()
+        for item in sol2:
+            if isinstance(item, Tuple):
+                flat_sol2.update(item) # Break the coordinate apart
+            else:
+                flat_sol2.add(item)
         
-        # 1. Perfect Match
-        if sol1 == sol2:
+        # Convert sol1 to set for comparison
+        correct_set = set(sol1)
+        
+        # --- VERDICT ---
+        
+        # 1. Perfect Match (Sets are identical)
+        if correct_set == flat_sol2:
             return True, "Valid"
         
-        # 2. Subset Match (The "Partial Credit" Logic)
-        # If the student's answer (e.g., 4) is IN the previous solution set (-4, 4)
-        set1 = set(sol1)
-        set2 = set(sol2)
-        
-        if set2.issubset(set1) and len(set2) > 0:
-            return True, "Partial" # We return True so it passes, but we can flag it
+        # 2. Subset Match (Partial Credit)
+        if flat_sol2.issubset(correct_set) and len(flat_sol2) > 0:
+            return True, "Partial"
             
         return False, "Invalid"
 
@@ -68,14 +86,13 @@ def validate_step(line_prev_str, line_curr_str):
         return False, f"Syntax Error: {e}"
 
 def diagnose_error(line_prev_str, line_curr_str):
-    # (Same diagnostic code as before, simplified for space)
     return "Check your math logic."
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="Step-Checker v0.5", page_icon="🧮")
-st.title("🧮 Step-Checker v0.5")
-st.caption("Now with 'Partial Credit' Logic & ^ Support")
+st.set_page_config(page_title="Step-Checker v0.6", page_icon="🧮")
+st.title("🧮 Step-Checker v0.6")
+st.caption("Now supports lists (4, -4) and +/- syntax")
 
 col1, col2 = st.columns(2)
 
@@ -94,7 +111,7 @@ with col2:
 st.markdown("##### ⌨️ Quick Keys")
 k1, k2, k3, k4, k5 = st.columns(5)
 k1.button("x²", on_click=add_to_curr, args=("**2",))
-k2.button("√x", on_click=add_to_curr, args=("sqrt(",))
+k2.button("±", on_click=add_to_curr, args=("+/-",)) # Updated Button!
 k3.button("÷", on_click=add_to_curr, args=("/",))
 k4.button("(", on_click=add_to_curr, args=("(",))
 k5.button(")", on_click=add_to_curr, args=(")",))
@@ -112,6 +129,6 @@ if st.button("Check Logic", type="primary"):
         st.balloons()
     elif is_valid and status == "Partial":
         st.warning("⚠️ **Technically Correct, but Incomplete.**")
-        st.write("You found one valid solution ($x=4$), but did you miss another one? Remember: $x^2 = 16$ has two roots!")
+        st.write("You found one valid solution, but you missed the other root.")
     else:
         st.error("❌ **Logic Break**")
