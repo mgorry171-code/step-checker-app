@@ -183,3 +183,14 @@ with st.expander("ℹ️ How to type answers (Notation Guide)"):
         * `x = 4 and -4`
         * `x = +/- 4`
     """)
+    # --- FOOTER ---
+st.markdown("---")
+st.markdown(
+    """
+    <div style='text-align: center; color: #666;'>
+        <small>Built by a Math Teacher in NYC 🍎 | © 2026 Step-Checker</small>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
