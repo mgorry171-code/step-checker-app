@@ -1,6 +1,6 @@
 import streamlit as st
 import sympy
-from sympy import symbols, sympify, solve, Eq, latex, Tuple
+from sympy import symbols, sympify, solve, Eq, latex
 
 # --- SETUP SESSION STATE ---
 if 'line_prev' not in st.session_state:
@@ -14,10 +14,14 @@ def add_to_curr(text_to_add):
 
 def pretty_print(math_str):
     try:
-        # Visual fix for +/-
         clean_str = math_str.replace("+/-", "±")
         if "=" in clean_str:
             lhs, rhs = clean_str.split("=")
+            # If there's a comma in the answer (4, -4), we just latex the string directly
+            # to avoid SymPy getting confused by tuples in the display
+            if "," in rhs:
+                return f"{latex(sympify(lhs))} = {rhs}"
+            
             lat_lhs = latex(sympify(lhs))
             lat_rhs = latex(sympify(rhs))
             return f"{lat_lhs} = {lat_rhs}"
@@ -29,55 +33,68 @@ def pretty_print(math_str):
 def validate_step(line_prev_str, line_curr_str):
     x = symbols('x')
     try:
-        def parse_eq(eq_str):
-            # 1. Handle "+/-" by expanding it manually
-            # If user types "x = +/- 4", we treat it as the set {-4, 4}
-            if "+/-" in eq_str:
-                parts = eq_str.split("+/-")
-                val = sympify(parts[1])
-                # Return an equation equal to a Set of values {-val, val}
-                # (Note: This is a hack to force 'solve' to see both values)
-                return Eq(x**2, val**2) 
-                
-            # 2. Standard Parsing
-            eq_str = eq_str.replace("^", "**") 
-            
-            if "=" in eq_str:
-                lhs, rhs = eq_str.split("=")
-                return Eq(sympify(lhs), sympify(rhs))
-            else:
-                return sympify(eq_str)
+        # --- PARSE PREVIOUS LINE (The "Truth") ---
+        # Standard parsing for the starting equation
+        if "=" in line_prev_str:
+            lhs, rhs = line_prev_str.replace("^", "**").split("=")
+            eq1 = Eq(sympify(lhs), sympify(rhs))
+        else:
+            eq1 = sympify(line_prev_str.replace("^", "**"))
 
-        eq1 = parse_eq(line_prev_str)
-        eq2 = parse_eq(line_curr_str)
-        
-        if not line_prev_str or not line_curr_str:
-            return False, "Empty Input"
-
+        # Solve Line A to get the "Correct Set"
         sol1 = solve(eq1, x)
-        sol2 = solve(eq2, x)
-        
-        # --- FLATTEN LOGIC (The Fix for '4, -4') ---
-        # If sol2 looks like [(4, -4)], it's a tuple (coordinate).
-        # We need to flatten it into [-4, 4]
-        flat_sol2 = set()
-        for item in sol2:
-            if isinstance(item, Tuple):
-                flat_sol2.update(item) # Break the coordinate apart
-            else:
-                flat_sol2.add(item)
-        
-        # Convert sol1 to set for comparison
         correct_set = set(sol1)
+
+        # --- PARSE CURRENT LINE (The "Student Input") ---
+        # logic: If there is a comma, we treat it as a manual list of values
+        user_set = set()
         
+        # Pre-clean string
+        clean_curr = line_curr_str.replace("^", "**")
+        
+        # Case A: User typed "+/-" (e.g. x = +/- 4)
+        if "+/-" in clean_curr:
+            parts = clean_curr.split("+/-")
+            val = sympify(parts[1])
+            user_set.add(val)
+            user_set.add(-val)
+            
+        # Case B: User typed a list (e.g. x = 4, -4)
+        elif "," in clean_curr:
+            # We assume the format "x = 4, -4" or just "4, -4"
+            if "=" in clean_curr:
+                rhs = clean_curr.split("=")[1]
+            else:
+                rhs = clean_curr
+            
+            # Split by comma and sympify each part
+            vals = rhs.split(",")
+            for v in vals:
+                user_set.add(sympify(v))
+                
+        # Case C: Standard Equation (e.g. x = 4)
+        elif "=" in clean_curr:
+            lhs, rhs = clean_curr.split("=")
+            eq2 = Eq(sympify(lhs), sympify(rhs))
+            sol2 = solve(eq2, x)
+            user_set = set(sol2)
+            
+        else:
+            # Just an expression?
+            user_set = set() # Invalid state for this specific check
+
         # --- VERDICT ---
         
-        # 1. Perfect Match (Sets are identical)
-        if correct_set == flat_sol2:
+        # Check for empty input issues
+        if not line_prev_str or not line_curr_str:
+            return False, "Empty"
+
+        # 1. Perfect Match
+        if correct_set == user_set:
             return True, "Valid"
         
         # 2. Subset Match (Partial Credit)
-        if flat_sol2.issubset(correct_set) and len(flat_sol2) > 0:
+        if user_set.issubset(correct_set) and len(user_set) > 0:
             return True, "Partial"
             
         return False, "Invalid"
@@ -90,9 +107,9 @@ def diagnose_error(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="Step-Checker v0.6", page_icon="🧮")
-st.title("🧮 Step-Checker v0.6")
-st.caption("Now supports lists (4, -4) and +/- syntax")
+st.set_page_config(page_title="Step-Checker v0.7", page_icon="🧮")
+st.title("🧮 Step-Checker v0.7")
+st.caption("Now supports comma lists: x = 4, -4")
 
 col1, col2 = st.columns(2)
 
@@ -111,7 +128,7 @@ with col2:
 st.markdown("##### ⌨️ Quick Keys")
 k1, k2, k3, k4, k5 = st.columns(5)
 k1.button("x²", on_click=add_to_curr, args=("**2",))
-k2.button("±", on_click=add_to_curr, args=("+/-",)) # Updated Button!
+k2.button("±", on_click=add_to_curr, args=("+/-",))
 k3.button("÷", on_click=add_to_curr, args=("/",))
 k4.button("(", on_click=add_to_curr, args=("(",))
 k5.button(")", on_click=add_to_curr, args=(")",))
