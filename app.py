@@ -14,11 +14,12 @@ def add_to_curr(text_to_add):
 
 def pretty_print(math_str):
     try:
-        clean_str = math_str.replace("+/-", "±")
+        # Visual fixes for display
+        clean_str = math_str.replace("+/-", "±").replace(" and ", ", ")
+        
         if "=" in clean_str:
             lhs, rhs = clean_str.split("=")
-            # If there's a comma in the answer (4, -4), we just latex the string directly
-            # to avoid SymPy getting confused by tuples in the display
+            # If there's a comma/list in the answer, latex the whole string to avoid tuple issues
             if "," in rhs:
                 return f"{latex(sympify(lhs))} = {rhs}"
             
@@ -34,23 +35,20 @@ def validate_step(line_prev_str, line_curr_str):
     x = symbols('x')
     try:
         # --- PARSE PREVIOUS LINE (The "Truth") ---
-        # Standard parsing for the starting equation
         if "=" in line_prev_str:
             lhs, rhs = line_prev_str.replace("^", "**").split("=")
             eq1 = Eq(sympify(lhs), sympify(rhs))
         else:
             eq1 = sympify(line_prev_str.replace("^", "**"))
 
-        # Solve Line A to get the "Correct Set"
         sol1 = solve(eq1, x)
         correct_set = set(sol1)
 
         # --- PARSE CURRENT LINE (The "Student Input") ---
-        # logic: If there is a comma, we treat it as a manual list of values
         user_set = set()
         
-        # Pre-clean string
-        clean_curr = line_curr_str.replace("^", "**")
+        # 1. CLEANING: Treat 'and' exactly like a comma
+        clean_curr = line_curr_str.replace("^", "**").replace(" and ", ",")
         
         # Case A: User typed "+/-" (e.g. x = +/- 4)
         if "+/-" in clean_curr:
@@ -59,18 +57,19 @@ def validate_step(line_prev_str, line_curr_str):
             user_set.add(val)
             user_set.add(-val)
             
-        # Case B: User typed a list (e.g. x = 4, -4)
+        # Case B: User typed a list (e.g. x = 4, -4 OR x = 4 and -4)
         elif "," in clean_curr:
-            # We assume the format "x = 4, -4" or just "4, -4"
             if "=" in clean_curr:
                 rhs = clean_curr.split("=")[1]
             else:
                 rhs = clean_curr
             
-            # Split by comma and sympify each part
+            # Split by comma
             vals = rhs.split(",")
             for v in vals:
-                user_set.add(sympify(v))
+                # specific check to ignore empty strings if they typed "4, "
+                if v.strip(): 
+                    user_set.add(sympify(v))
                 
         # Case C: Standard Equation (e.g. x = 4)
         elif "=" in clean_curr:
@@ -80,20 +79,15 @@ def validate_step(line_prev_str, line_curr_str):
             user_set = set(sol2)
             
         else:
-            # Just an expression?
-            user_set = set() # Invalid state for this specific check
+            user_set = set() 
 
         # --- VERDICT ---
-        
-        # Check for empty input issues
         if not line_prev_str or not line_curr_str:
             return False, "Empty"
 
-        # 1. Perfect Match
         if correct_set == user_set:
             return True, "Valid"
         
-        # 2. Subset Match (Partial Credit)
         if user_set.issubset(correct_set) and len(user_set) > 0:
             return True, "Partial"
             
@@ -107,9 +101,9 @@ def diagnose_error(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="Step-Checker v0.7", page_icon="🧮")
-st.title("🧮 Step-Checker v0.7")
-st.caption("Now supports comma lists: x = 4, -4")
+st.set_page_config(page_title="Step-Checker v0.8", page_icon="🧮")
+st.title("🧮 Step-Checker v0.8")
+st.caption("Now accepts 'x = 4 and -4'")
 
 col1, col2 = st.columns(2)
 
@@ -128,7 +122,7 @@ with col2:
 st.markdown("##### ⌨️ Quick Keys")
 k1, k2, k3, k4, k5 = st.columns(5)
 k1.button("x²", on_click=add_to_curr, args=("**2",))
-k2.button("±", on_click=add_to_curr, args=("+/-",))
+k2.button("±", on_click=add_to_curr, args=("+/-",)) 
 k3.button("÷", on_click=add_to_curr, args=("/",))
 k4.button("(", on_click=add_to_curr, args=("(",))
 k5.button(")", on_click=add_to_curr, args=(")",))
@@ -149,3 +143,15 @@ if st.button("Check Logic", type="primary"):
         st.write("You found one valid solution, but you missed the other root.")
     else:
         st.error("❌ **Logic Break**")
+
+# --- NOTATION GUIDE ---
+with st.expander("ℹ️ How to type answers (Notation Guide)"):
+    st.markdown("""
+    The Step-Checker is flexible, but here are the best ways to format your math:
+    
+    * **Exponents:** Use the **x²** button or type `^` (e.g., `x^2`).
+    * **Multiple Answers:** * Use commas: `x = 4, -4`
+        * Use 'and': `x = 4 and -4`
+        * Use plus/minus: `x = +/- 4`
+    * **Square Roots:** Use `sqrt(x)` or the **√x** button.
+    """)
