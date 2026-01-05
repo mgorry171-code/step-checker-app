@@ -12,14 +12,33 @@ if 'line_curr' not in st.session_state:
 def add_to_curr(text_to_add):
     st.session_state.line_curr += text_to_add
 
+def clean_input(text):
+    """
+    Standardizes input to handle spaces and formatting issues.
+    This makes 'x = 4' and 'x=4' identical to the computer.
+    """
+    # 1. Replace natural language "and" with comma
+    text = text.replace(" and ", ",")
+    # 2. Handle exponents
+    text = text.replace("^", "**")
+    # 3. Standardize "+/-"
+    text = text.replace("+/-", "±") # internal placeholder
+    return text
+
 def pretty_print(math_str):
     try:
-        # Visual fixes for display
-        clean_str = math_str.replace("+/-", "±").replace(" and ", ", ")
+        # Pre-clean the input for display
+        clean_str = clean_input(math_str)
+        # Swap back internal placeholder for display logic if needed
+        clean_str = clean_str.replace("±", "±") 
         
         if "=" in clean_str:
             lhs, rhs = clean_str.split("=")
-            # If there's a comma/list in the answer, latex the whole string to avoid tuple issues
+            # Strip whitespace from sides so 'x = ' becomes 'x'
+            lhs = lhs.strip()
+            rhs = rhs.strip()
+            
+            # If there's a comma/list in the answer, latex the whole string
             if "," in rhs:
                 return f"{latex(sympify(lhs))} = {rhs}"
             
@@ -35,51 +54,62 @@ def validate_step(line_prev_str, line_curr_str):
     x = symbols('x')
     try:
         # --- PARSE PREVIOUS LINE (The "Truth") ---
-        if "=" in line_prev_str:
-            lhs, rhs = line_prev_str.replace("^", "**").split("=")
-            eq1 = Eq(sympify(lhs), sympify(rhs))
+        # Clean and Strip Spaces
+        clean_prev = clean_input(line_prev_str)
+        
+        if "=" in clean_prev:
+            lhs, rhs = clean_prev.split("=")
+            eq1 = Eq(sympify(lhs.strip()), sympify(rhs.strip()))
         else:
-            eq1 = sympify(line_prev_str.replace("^", "**"))
+            eq1 = sympify(clean_prev)
 
         sol1 = solve(eq1, x)
         correct_set = set(sol1)
 
         # --- PARSE CURRENT LINE (The "Student Input") ---
         user_set = set()
+        clean_curr = clean_input(line_curr_str)
         
-        # 1. CLEANING: Treat 'and' exactly like a comma
-        clean_curr = line_curr_str.replace("^", "**").replace(" and ", ",")
-        
-        # Case A: User typed "+/-" (e.g. x = +/- 4)
-        if "+/-" in clean_curr:
-            parts = clean_curr.split("+/-")
-            val = sympify(parts[1])
+        # Case A: User typed "+/-" (using our placeholder from clean_input)
+        if "±" in clean_curr:
+            parts = clean_curr.split("±")
+            # We assume the format "x = +/- 4"
+            # parts[1] is the value after the symbol
+            val_str = parts[1].strip()
+            val = sympify(val_str)
             user_set.add(val)
             user_set.add(-val)
             
-        # Case B: User typed a list (e.g. x = 4, -4 OR x = 4 and -4)
+        # Case B: User typed a list (comma separated)
         elif "," in clean_curr:
             if "=" in clean_curr:
                 rhs = clean_curr.split("=")[1]
             else:
                 rhs = clean_curr
             
-            # Split by comma
             vals = rhs.split(",")
             for v in vals:
-                # specific check to ignore empty strings if they typed "4, "
-                if v.strip(): 
+                v = v.strip() # Remove spaces around numbers " 4 " -> "4"
+                if v: 
                     user_set.add(sympify(v))
                 
-        # Case C: Standard Equation (e.g. x = 4)
+        # Case C: Standard Equation
         elif "=" in clean_curr:
             lhs, rhs = clean_curr.split("=")
-            eq2 = Eq(sympify(lhs), sympify(rhs))
+            eq2 = Eq(sympify(lhs.strip()), sympify(rhs.strip()))
             sol2 = solve(eq2, x)
             user_set = set(sol2)
             
         else:
-            user_set = set() 
+            # Just a number or expression
+            # If they just typed "4", we sympify it
+            if clean_curr.strip():
+                 # This handles if they just type the answer "4" without "x="
+                 try:
+                    val = sympify(clean_curr.strip())
+                    user_set.add(val)
+                 except:
+                    pass
 
         # --- VERDICT ---
         if not line_prev_str or not line_curr_str:
@@ -101,9 +131,9 @@ def diagnose_error(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="Step-Checker v0.8", page_icon="🧮")
-st.title("🧮 Step-Checker v0.8")
-st.caption("Now accepts 'x = 4 and -4'")
+st.set_page_config(page_title="Step-Checker v0.9", page_icon="🧮")
+st.title("🧮 Step-Checker v0.9")
+st.caption("Now Space-Insensitive (Auto-Formatting)")
 
 col1, col2 = st.columns(2)
 
@@ -147,11 +177,9 @@ if st.button("Check Logic", type="primary"):
 # --- NOTATION GUIDE ---
 with st.expander("ℹ️ How to type answers (Notation Guide)"):
     st.markdown("""
-    The Step-Checker is flexible, but here are the best ways to format your math:
-    
+    * **Spaces:** The app ignores spaces. `x=4` and `x = 4` are the same.
     * **Exponents:** Use the **x²** button or type `^` (e.g., `x^2`).
-    * **Multiple Answers:** * Use commas: `x = 4, -4`
-        * Use 'and': `x = 4 and -4`
-        * Use plus/minus: `x = +/- 4`
-    * **Square Roots:** Use `sqrt(x)` or the **√x** button.
+    * **Multiple Answers:** * `x = 4, -4`
+        * `x = 4 and -4`
+        * `x = +/- 4`
     """)
