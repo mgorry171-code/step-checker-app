@@ -7,7 +7,7 @@ import pandas as pd
 
 # --- SETUP SESSION STATE ---
 if 'line_prev' not in st.session_state:
-    st.session_state.line_prev = "2(x+4) = 20"
+    st.session_state.line_prev = "x^2 = 16"
 if 'line_curr' not in st.session_state:
     st.session_state.line_curr = ""
 if 'history' not in st.session_state:
@@ -18,42 +18,40 @@ def add_to_curr(text_to_add):
     st.session_state.line_curr += text_to_add
 
 def clean_input(text):
+    """
+    Master cleaner:
+    1. Lowercase everything (Fixes 'X' vs 'x')
+    2. Swaps 'and' for ','
+    3. Swaps '^' for '**'
+    4. Swaps '+/-' for '±'
+    """
+    text = text.lower() # Force lowercase
     text = text.replace(" and ", ",")
     text = text.replace("^", "**")
     text = text.replace("+/-", "±")
-    # We do NOT replace 2x with 2*x manually anymore. 
-    # The new smart_parse function handles that!
     return text
 
 def smart_parse(text, evaluate=True):
     """
-    The 'Human' Parser.
-    1. Handles implicit multiplication (2x -> 2*x).
-    2. Handles evaluate=False (prevents 2(x+4) turning into 2x+8 in visuals).
+    Parses text into SymPy expressions with implicit multiplication (2x -> 2*x).
     """
-    # Define the transformations (rules) for the parser
-    # "implicit_multiplication_application" allows '2x' and '2(x+4)'
     transformations = (standard_transformations + (implicit_multiplication_application,))
-    
     try:
         if "=" in text:
             parts = text.split("=")
-            # Parse LHS and RHS separately
             lhs = parse_expr(parts[0], transformations=transformations, evaluate=evaluate)
             rhs = parse_expr(parts[1], transformations=transformations, evaluate=evaluate)
             return Eq(lhs, rhs)
         else:
             return parse_expr(text, transformations=transformations, evaluate=evaluate)
-    except Exception as e:
-        # Fallback if something is really weird
+    except:
         return sympify(text, evaluate=evaluate)
 
 def pretty_print(math_str):
     try:
         clean_str = clean_input(math_str)
         clean_str = clean_str.replace("±", "±")
-        
-        # KEY FIX: evaluate=False stops the engine from solving distribution in the preview
+        # evaluate=False prevents 2(x+4) from becoming 2x+8 in the preview
         expr = smart_parse(clean_str, evaluate=False)
         return latex(expr)
     except:
@@ -62,71 +60,92 @@ def pretty_print(math_str):
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
-def diagnose_error(line_prev_str, line_curr_str):
+def extract_values(text_str):
+    """
+    Robustly extracts a SET of numerical solutions from a string.
+    Handles: "x=4", "4", "4, -4", "x=4, -4", "x = +/- 4"
+    Returns: A Python set of SymPy numbers.
+    """
     x = symbols('x')
+    vals = set()
+    clean = clean_input(text_str)
+    
     try:
-        # We need values to compare
-        eq_prev = smart_parse(clean_input(line_prev_str))
-        eq_curr = smart_parse(clean_input(line_curr_str))
+        # Case A: "+/-" syntax
+        if "±" in clean:
+            parts = clean.split("±")
+            val = smart_parse(parts[1].strip(), evaluate=True)
+            vals.add(val)
+            vals.add(-val)
+            
+        # Case B: Comma list (4, -4)
+        elif "," in clean:
+            rhs = clean.split("=")[1] if "=" in clean else clean
+            items = rhs.split(",")
+            for i in items:
+                if i.strip():
+                    vals.add(smart_parse(i.strip(), evaluate=True))
+                    
+        # Case C: Equation or Single Expression
+        elif "=" in clean:
+            eq = smart_parse(clean, evaluate=True)
+            sol = solve(eq, x)
+            vals.update(sol)
+            
+        else:
+            # Just a number "4"
+            if clean.strip():
+                vals.add(smart_parse(clean.strip(), evaluate=True))
+                
+    except Exception:
+        pass # If extraction fails, we return whatever we found so far
         
-        sol_prev = solve(eq_prev, x)
-        sol_curr = solve(eq_curr, x)
-        
-        if not sol_prev or not sol_curr:
-             return "I'm confused. Please check your syntax."
+    return vals
 
-        # Get the numbers
-        val_prev = sol_prev[0]
-        val_curr = sol_curr[0]
+def diagnose_error(line_prev_str, line_curr_str):
+    try:
+        # 1. Get the "Correct" values from previous line
+        correct_vals = extract_values(line_prev_str)
+        # 2. Get the "Student" values from current line
+        student_vals = extract_values(line_curr_str)
         
-        # Calculate the difference
-        diff = val_curr - val_prev
+        if not correct_vals:
+            return "I can't solve the previous line."
+        if not student_vals:
+            return "I can't understand your answer syntax."
+            
+        # Compare just one value to see if there is a predictable offset
+        # (This is a simple heuristic)
+        val_correct = list(correct_vals)[0]
+        val_student = list(student_vals)[0]
         
-        # --- THE HINT LOGIC ---
+        diff = val_student - val_correct
+        
         if diff != 0:
-            return f"The math doesn't match. (Difference: {diff}). Check your signs or operations."
+            return f"The values don't match. (Difference: {diff}). Check signs or arithmetic."
             
         return "Logic error."
     except:
         return "Check your math logic."
 
 def validate_step(line_prev_str, line_curr_str):
-    x = symbols('x')
     try:
-        # Use smart_parse with evaluate=True for the MATH CHECK
-        eq1 = smart_parse(clean_input(line_prev_str), evaluate=True)
-        sol1 = solve(eq1, x)
-        correct_set = set(sol1)
-
-        user_set = set()
-        clean_curr = clean_input(line_curr_str)
-        
-        if "±" in clean_curr:
-            parts = clean_curr.split("±")
-            val = smart_parse(parts[1].strip(), evaluate=True)
-            user_set.add(val)
-            user_set.add(-val)
-        elif "," in clean_curr:
-            rhs = clean_curr.split("=")[1] if "=" in clean_curr else clean_curr
-            vals = rhs.split(",")
-            for v in vals:
-                if v.strip(): user_set.add(smart_parse(v.strip(), evaluate=True))
-        elif "=" in clean_curr:
-            eq2 = smart_parse(clean_curr, evaluate=True)
-            sol2 = solve(eq2, x)
-            user_set = set(sol2)
-        else:
-            if clean_curr.strip():
-                 try:
-                    user_set.add(smart_parse(clean_curr.strip(), evaluate=True))
-                 except: pass
-
         if not line_prev_str or not line_curr_str:
             return False, "Empty"
 
+        # USE THE NEW UNIFIED EXTRACTOR
+        correct_set = extract_values(line_prev_str)
+        user_set = extract_values(line_curr_str)
+        
+        # If extraction failed (e.g. syntax garbage), return False
+        if not correct_set and line_prev_str: 
+            return False, "Syntax Error in Line A"
+            
+        # 1. Perfect Match
         if correct_set == user_set:
             return True, "Valid"
         
+        # 2. Subset (Partial Credit)
         if user_set.issubset(correct_set) and len(user_set) > 0:
             return True, "Partial"
             
@@ -137,8 +156,8 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="Step-Checker v1.3", page_icon="🧮")
-st.title("🧮 Step-Checker v1.3")
+st.set_page_config(page_title="Step-Checker v1.4", page_icon="🧮")
+st.title("🧮 Step-Checker v1.4")
 
 # Sidebar
 with st.sidebar:
@@ -175,7 +194,7 @@ with col2:
 
 st.markdown("##### ⌨️ Quick Keys")
 k1, k2, k3, k4, k5 = st.columns(5)
-k1.button("x²", on_click=add_to_curr, args=("**2",))
+k1.button("x²", on_click=add_to_curr, args=("^2",)) # Updated to ^ for student familiarity
 k2.button("±", on_click=add_to_curr, args=("+/-",)) 
 k3.button("÷", on_click=add_to_curr, args=("/",))
 k4.button("(", on_click=add_to_curr, args=("(",))
@@ -189,19 +208,17 @@ if st.button("Check Logic", type="primary"):
     
     is_valid, status = validate_step(line_a, line_b)
     
-    # RESTORED: Socratic Hint Logic
     hint_message = ""
     if not is_valid:
         hint_message = diagnose_error(line_a, line_b)
 
-    # LOG RESULT
     now = datetime.datetime.now().strftime("%H:%M:%S")
     st.session_state.history.append({
         "Time": now,
         "Input A": line_a,
         "Input B": line_b,
         "Result": status,
-        "Hint Given": hint_message # Added hint to CSV too!
+        "Hint Given": hint_message
     })
     
     if is_valid and status == "Valid":
@@ -211,9 +228,9 @@ if st.button("Check Logic", type="primary"):
         st.warning("⚠️ **Technically Correct, but Incomplete.**")
         st.write("You found one valid solution, but you missed the other root.")
     else:
-        # RESTORED: Error display
         st.error("❌ **Logic Break**")
-        st.info(f"💡 {hint_message}")
+        if hint_message:
+            st.info(f"💡 {hint_message}")
 
 # --- FOOTER ---
 st.markdown("---")
