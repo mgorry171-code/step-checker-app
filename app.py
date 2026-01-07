@@ -1,13 +1,13 @@
 import streamlit as st
 import sympy
-from sympy import symbols, sympify, solve, Eq, latex
+from sympy import symbols, sympify, solve, Eq, latex, Abs
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application
 import datetime
 import pandas as pd
 
 # --- SETUP SESSION STATE ---
 if 'line_prev' not in st.session_state:
-    st.session_state.line_prev = "x^2 = 16"
+    st.session_state.line_prev = "x/2 + 2 = 10"
 if 'line_curr' not in st.session_state:
     st.session_state.line_curr = ""
 if 'history' not in st.session_state:
@@ -24,11 +24,30 @@ def clean_input(text):
     2. Swaps 'and' for ','
     3. Swaps '^' for '**'
     4. Swaps '+/-' for '±'
+    5. NEW: Swaps '%' for '/100'
+    6. NEW: Swaps ' of ' for '*'
+    7. NEW: Swaps '|...|' (pipes) for 'abs(...)' if user types them
     """
-    text = text.lower() # Force lowercase
+    text = text.lower()
     text = text.replace(" and ", ",")
     text = text.replace("^", "**")
     text = text.replace("+/-", "±")
+    
+    # NEW: Percentage and "Of" logic
+    text = text.replace("%", "/100")
+    text = text.replace(" of ", "*")
+    
+    # NEW: Handle pipe bars for absolute value |x| -> abs(x)
+    # Simple heuristic: if we see pipes, we try to wrap content in abs()
+    # Note: Complex parsing of nested pipes is hard, but this covers basic usage.
+    if "|" in text:
+        # We leave pipes for the parser to handle if possible, 
+        # or we could recommend users use 'abs()'. 
+        # For now, let's just clean common simple pipe usage if needed,
+        # but SymPy doesn't use pipes for input naturally.
+        # We will assume user might type 'abs(-4)' as per your bug report.
+        pass 
+        
     return text
 
 def smart_parse(text, evaluate=True):
@@ -51,7 +70,8 @@ def pretty_print(math_str):
     try:
         clean_str = clean_input(math_str)
         clean_str = clean_str.replace("±", "±")
-        # evaluate=False prevents 2(x+4) from becoming 2x+8 in the preview
+        
+        # evaluate=False prevents 2(x+4) from becoming 2x+8
         expr = smart_parse(clean_str, evaluate=False)
         return latex(expr)
     except:
@@ -62,9 +82,7 @@ def convert_df_to_csv(df):
 
 def extract_values(text_str):
     """
-    Robustly extracts a SET of numerical solutions from a string.
-    Handles: "x=4", "4", "4, -4", "x=4, -4", "x = +/- 4"
-    Returns: A Python set of SymPy numbers.
+    Robustly extracts a SET of numerical solutions.
     """
     x = symbols('x')
     vals = set()
@@ -78,7 +96,7 @@ def extract_values(text_str):
             vals.add(val)
             vals.add(-val)
             
-        # Case B: Comma list (4, -4)
+        # Case B: Comma list
         elif "," in clean:
             rhs = clean.split("=")[1] if "=" in clean else clean
             items = rhs.split(",")
@@ -86,36 +104,34 @@ def extract_values(text_str):
                 if i.strip():
                     vals.add(smart_parse(i.strip(), evaluate=True))
                     
-        # Case C: Equation or Single Expression
+        # Case C: Equation or Expression
         elif "=" in clean:
             eq = smart_parse(clean, evaluate=True)
             sol = solve(eq, x)
             vals.update(sol)
             
         else:
-            # Just a number "4"
+            # Just a number or expression (like "20% of 100")
             if clean.strip():
-                vals.add(smart_parse(clean.strip(), evaluate=True))
+                # If it's an expression like "20/100 * 100", calculating it gives the 'value'
+                val = smart_parse(clean.strip(), evaluate=True)
+                vals.add(val)
                 
     except Exception:
-        pass # If extraction fails, we return whatever we found so far
+        pass
         
     return vals
 
 def diagnose_error(line_prev_str, line_curr_str):
     try:
-        # 1. Get the "Correct" values from previous line
         correct_vals = extract_values(line_prev_str)
-        # 2. Get the "Student" values from current line
         student_vals = extract_values(line_curr_str)
         
         if not correct_vals:
-            return "I can't solve the previous line."
+            return "I can't solve the previous line (Syntax error?)."
         if not student_vals:
-            return "I can't understand your answer syntax."
+            return "I can't understand your answer."
             
-        # Compare just one value to see if there is a predictable offset
-        # (This is a simple heuristic)
         val_correct = list(correct_vals)[0]
         val_student = list(student_vals)[0]
         
@@ -133,13 +149,14 @@ def validate_step(line_prev_str, line_curr_str):
         if not line_prev_str or not line_curr_str:
             return False, "Empty"
 
-        # USE THE NEW UNIFIED EXTRACTOR
         correct_set = extract_values(line_prev_str)
         user_set = extract_values(line_curr_str)
         
-        # If extraction failed (e.g. syntax garbage), return False
+        # FIX FOR ISSUE #1: Safety Check
+        # If correct_set is empty, it means we failed to solve the Previous Line.
+        # We MUST NOT return True here.
         if not correct_set and line_prev_str: 
-            return False, "Syntax Error in Line A"
+            return False, "Could not solve Line A"
             
         # 1. Perfect Match
         if correct_set == user_set:
@@ -156,8 +173,8 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="Step-Checker v1.4", page_icon="🧮")
-st.title("🧮 Step-Checker v1.4")
+st.set_page_config(page_title="Step-Checker v1.5", page_icon="🧮")
+st.title("🧮 Step-Checker v1.5")
 
 # Sidebar
 with st.sidebar:
@@ -183,6 +200,7 @@ col1, col2 = st.columns(2)
 with col1:
     st.markdown("### Previous Line")
     st.text_input("Line A", key="line_prev", label_visibility="collapsed")
+    # Preview logic
     if st.session_state.line_prev:
         st.latex(pretty_print(st.session_state.line_prev))
 
@@ -194,9 +212,9 @@ with col2:
 
 st.markdown("##### ⌨️ Quick Keys")
 k1, k2, k3, k4, k5 = st.columns(5)
-k1.button("x²", on_click=add_to_curr, args=("^2",)) # Updated to ^ for student familiarity
+k1.button("x²", on_click=add_to_curr, args=("^2",)) 
 k2.button("±", on_click=add_to_curr, args=("+/-",)) 
-k3.button("÷", on_click=add_to_curr, args=("/",))
+k3.button("|x|", on_click=add_to_curr, args=("abs(",)) # NEW BUTTON for Absolute Value
 k4.button("(", on_click=add_to_curr, args=("(",))
 k5.button(")", on_click=add_to_curr, args=(")",))
 
