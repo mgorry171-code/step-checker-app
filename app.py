@@ -7,17 +7,16 @@ import pandas as pd
 
 # --- SETUP SESSION STATE ---
 if 'line_prev' not in st.session_state:
-    st.session_state.line_prev = "5% of 30"
+    st.session_state.line_prev = "x + 4 = 10"
 if 'line_curr' not in st.session_state:
     st.session_state.line_curr = ""
 if 'history' not in st.session_state:
     st.session_state.history = []
 if 'keypad_target' not in st.session_state:
-    st.session_state.keypad_target = "Current Line" # Default target
+    st.session_state.keypad_target = "Current Line"
 
 # --- HELPER FUNCTIONS ---
 def add_to_input(text_to_add):
-    """Adds text to the currently selected target box."""
     if st.session_state.keypad_target == "Previous Line":
         st.session_state.line_prev += text_to_add
     else:
@@ -33,30 +32,34 @@ def clean_input(text):
     return text
 
 def smart_parse(text, evaluate=True):
+    """
+    Parses text into SymPy expressions. 
+    Critically, it must handle '=' splitting even if evaluate=False (Preview Mode).
+    """
     transformations = (standard_transformations + (implicit_multiplication_application,))
     try:
-        # If we are parsing for the PREVIEW (evaluate=False), we want to be very careful
-        if not evaluate:
-             # Basic Parse
-             expr = parse_expr(text, transformations=transformations, evaluate=False)
-             return expr
-             
-        # Normal Solving Parse
+        # ALWAYS check for equation splitting first
         if "=" in text:
             parts = text.split("=")
-            lhs = parse_expr(parts[0], transformations=transformations, evaluate=evaluate)
-            rhs = parse_expr(parts[1], transformations=transformations, evaluate=evaluate)
+            # Parse LHS and RHS separately
+            lhs_text = parts[0].strip()
+            rhs_text = parts[1].strip()
+            
+            lhs = parse_expr(lhs_text, transformations=transformations, evaluate=evaluate)
+            rhs = parse_expr(rhs_text, transformations=transformations, evaluate=evaluate)
             return Eq(lhs, rhs)
         else:
+            # No equals sign, just an expression
             return parse_expr(text, transformations=transformations, evaluate=evaluate)
     except:
+        # Fallback
         return sympify(text, evaluate=evaluate)
 
 def pretty_print(math_str):
     try:
         clean_str = clean_input(math_str)
         clean_str = clean_str.replace("±", "±")
-        # evaluate=False should keep |-4| as |-4|
+        # evaluate=False keeps things like |-4| visually intact
         expr = smart_parse(clean_str, evaluate=False)
         return latex(expr)
     except:
@@ -95,51 +98,29 @@ def extract_values(text_str):
     return vals
 
 def check_numerical_match(set_a, set_b):
-    """
-    Fallback Logic: If symbolic sets don't match, try converting everything to floats.
-    This handles '1.5' (float) vs '3/2' (Rational).
-    """
     try:
-        # Convert set A to floats
         float_a = set()
         for item in set_a:
-            try:
-                float_a.add(float(N(item))) # N() forces numerical evaluation
+            try: float_a.add(float(N(item)))
             except: pass
             
-        # Convert set B to floats
         float_b = set()
         for item in set_b:
-            try:
-                float_b.add(float(N(item)))
+            try: float_b.add(float(N(item)))
             except: pass
             
-        # Check if empty (avoid false positives)
-        if not float_a or not float_b:
-            return False
-
-        # Check for near-equality (tolerance)
-        # We can't just do set_a == set_b with floats due to precision.
-        # Simple check: Are sets same size?
-        if len(float_a) != len(float_b):
-            return False
+        if not float_a or not float_b: return False
+        if len(float_a) != len(float_b): return False
             
-        # Check every item in B is close to some item in A
         matches = 0
         for val_b in float_b:
             for val_a in float_a:
-                if abs(val_b - val_a) < 1e-9: # 0.000000001 tolerance
+                if abs(val_b - val_a) < 1e-9:
                     matches += 1
                     break
-        
         return matches == len(float_a)
-        
     except:
         return False
-
-def diagnose_error(line_prev_str, line_curr_str):
-    # (Same diagnostic logic, simplified for brevity)
-    return "Check your math logic."
 
 def validate_step(line_prev_str, line_curr_str):
     try:
@@ -152,28 +133,22 @@ def validate_step(line_prev_str, line_curr_str):
         if not correct_set and line_prev_str: 
             return False, "Could not solve Line A"
             
-        # 1. Symbolic Match (Perfect)
-        if correct_set == user_set:
-            return True, "Valid"
-
-        # 2. Numerical Match (The "Decimal Fallback")
-        # This catches 1.5 vs 3/2
-        if check_numerical_match(correct_set, user_set):
-            return True, "Valid"
-        
-        # 3. Subset Match (Partial Credit)
-        if user_set.issubset(correct_set) and len(user_set) > 0:
-            return True, "Partial"
+        if correct_set == user_set: return True, "Valid"
+        if check_numerical_match(correct_set, user_set): return True, "Valid"
+        if user_set.issubset(correct_set) and len(user_set) > 0: return True, "Partial"
             
         return False, "Invalid"
 
     except Exception as e:
         return False, f"Syntax Error: {e}"
 
+def diagnose_error(line_prev_str, line_curr_str):
+    return "Check your math logic."
+
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="Step-Checker v1.6", page_icon="🧮")
-st.title("🧮 Step-Checker v1.6")
+st.set_page_config(page_title="Step-Checker v1.7", page_icon="🧮")
+st.title("🧮 Step-Checker v1.7")
 
 with st.sidebar:
     st.header("📝 Session Log")
@@ -200,10 +175,9 @@ with col2:
     if st.session_state.line_curr:
         st.latex(pretty_print(st.session_state.line_curr))
 
-# --- NEW: KEYPAD TARGET SELECTOR ---
 st.markdown("---")
-# This Radio button lets you choose where the keys type!
-target = st.radio("Keypad Target:", ["Previous Line", "Current Line"], horizontal=True, key="keypad_target")
+# Keypad Target
+st.radio("Keypad Target:", ["Previous Line", "Current Line"], horizontal=True, key="keypad_target", label_visibility="visible")
 
 st.markdown("##### ⌨️ Quick Keys")
 k1, k2, k3, k4, k5 = st.columns(5)
@@ -221,10 +195,7 @@ if st.button("Check Logic", type="primary"):
     
     is_valid, status = validate_step(line_a, line_b)
     
-    # Simple Hint Logic for display
-    hint_message = ""
-    if not is_valid: 
-        hint_message = "Values do not match."
+    hint = "Values do not match." if not is_valid else ""
 
     now = datetime.datetime.now().strftime("%H:%M:%S")
     st.session_state.history.append({
@@ -242,6 +213,6 @@ if st.button("Check Logic", type="primary"):
 # --- FOOTER ---
 st.markdown("---")
 st.markdown(
-    """<div style='text-align: center; color: #666;'><small>Built by a Math Teacher in NYC 🍎 | © 2026 Step-Checker</small></div>""",
+    """<div style='text-align: center; color: #666;'><small>Built by The Logic Lab 🧪 | © 2026 Step-Checker</small></div>""",
     unsafe_allow_html=True
 )
