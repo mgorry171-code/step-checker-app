@@ -25,21 +25,14 @@ def add_to_input(text_to_add):
 
 def clean_input(text):
     text = text.lower()
-    
-    # 1. Thousands separators
     text = re.sub(r'(\d),(\d{3})', r'\1\2', text)
     text = re.sub(r'(\d),(\d{3})', r'\1\2', text)
-
-    # 2. Basic Replacements
     text = text.replace(" and ", ",")
     text = text.replace("^", "**")
     text = text.replace("+/-", "±")
     text = text.replace("%", "/100")
     text = text.replace(" of ", "*")
-    
-    # 3. Inequality Standardization
     text = text.replace("=<", "<=").replace("=>", ">=")
-    
     return text
 
 def smart_parse(text, evaluate=True):
@@ -72,7 +65,6 @@ def convert_df_to_csv(df):
 def get_solution_set(text_str):
     x = symbols('x')
     clean = clean_input(text_str)
-    
     try:
         if "±" in clean:
             parts = clean.split("±")
@@ -83,8 +75,7 @@ def get_solution_set(text_str):
             items = rhs.split(",")
             vals = []
             for i in items:
-                if i.strip():
-                    vals.append(smart_parse(i.strip(), evaluate=True))
+                if i.strip(): vals.append(smart_parse(i.strip(), evaluate=True))
             return sympy.FiniteSet(*vals)
         else:
             expr = smart_parse(clean, evaluate=True)
@@ -99,9 +90,7 @@ def get_solution_set(text_str):
 
 def validate_step(line_prev_str, line_curr_str):
     try:
-        if not line_prev_str or not line_curr_str:
-            return False, "Empty"
-
+        if not line_prev_str or not line_curr_str: return False, "Empty"
         set_A = get_solution_set(line_prev_str)
         set_B = get_solution_set(line_curr_str)
         
@@ -110,16 +99,14 @@ def validate_step(line_prev_str, line_curr_str):
 
         if set_A == set_B: return True, "Valid"
         if set_B.is_subset(set_A) and not set_B.is_empty: return True, "Partial"
-            
         return False, "Invalid"
-
     except Exception as e:
         return False, f"Syntax Error: {e}"
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v2.2", page_icon="🧪")
-st.title("🧪 The Logic Lab (v2.2)")
+st.set_page_config(page_title="The Logic Lab v2.3", page_icon="🧪")
+st.title("🧪 The Logic Lab (v2.3)")
 
 with st.sidebar:
     st.header("📝 Session Log")
@@ -132,42 +119,49 @@ with st.sidebar:
             st.session_state.history = []
             st.rerun()
 
+# --- INPUT AREA ---
 col1, col2 = st.columns(2)
-
 with col1:
     st.markdown("### Previous Line")
     st.text_input("Line A", key="line_prev", label_visibility="collapsed")
-    if st.session_state.line_prev:
-        st.latex(pretty_print(st.session_state.line_prev))
+    if st.session_state.line_prev: st.latex(pretty_print(st.session_state.line_prev))
 
 with col2:
     st.markdown("### Current Line")
     st.text_input("Line B", key="line_curr", label_visibility="collapsed")
-    if st.session_state.line_curr:
-        st.latex(pretty_print(st.session_state.line_curr))
+    if st.session_state.line_curr: st.latex(pretty_print(st.session_state.line_curr))
 
 st.markdown("---")
-st.radio("Keypad Target:", ["Previous Line", "Current Line"], horizontal=True, key="keypad_target", label_visibility="visible")
 
-# --- UPDATED KEYPAD (2 ROWS) ---
-st.markdown("##### ⌨️ Quick Keys")
+# --- COLLAPSIBLE KEYPAD ---
+# The default is 'expanded=False', so it stays hidden until clicked.
+# You can change to 'expanded=True' if you want it open by default.
+with st.expander("⌨️ Show Math Keypad", expanded=False):
+    st.write("Click a button to add it to the **" + st.session_state.keypad_target + "**.")
+    
+    # Target Selection inside the menu
+    st.radio("Target:", ["Previous Line", "Current Line"], horizontal=True, key="keypad_target", label_visibility="collapsed")
+    st.write("") # Spacer
 
-# ROW 1: Operations
-r1_c1, r1_c2, r1_c3, r1_c4, r1_c5 = st.columns(5)
-r1_c1.button("x²", on_click=add_to_input, args=("^2",)) 
-r1_c2.button("|x|", on_click=add_to_input, args=("abs(",)) # Restored!
-r1_c3.button("(", on_click=add_to_input, args=("(",))      # Restored!
-r1_c4.button(")", on_click=add_to_input, args=(")",))      # Restored!
-r1_c5.button("±", on_click=add_to_input, args=("+/-",)) 
+    # Row 1
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.button("x²", on_click=add_to_input, args=("^2",))
+    c2.button("|x|", on_click=add_to_input, args=("abs(",))
+    c3.button("(", on_click=add_to_input, args=("(",))
+    c4.button(")", on_click=add_to_input, args=(")",))
+    c5.button("±", on_click=add_to_input, args=("+/-",))
+    c6.button("÷", on_click=add_to_input, args=("/",))
 
-# ROW 2: Inequalities
-r2_c1, r2_c2, r2_c3, r2_c4, r2_c5 = st.columns(5)
-r2_c1.button("<", on_click=add_to_input, args=("<",)) 
-r2_c2.button(">", on_click=add_to_input, args=(">",))      # Should be visible now
-r2_c3.button("≤", on_click=add_to_input, args=("<=",)) 
-r2_c4.button("≥", on_click=add_to_input, args=(">=",)) 
-# Empty 5th column in row 2 for spacing balance, or we can add Division back?
-r2_c5.button("÷", on_click=add_to_input, args=("/",))      # Why not?
+    # Row 2 (Inequalities)
+    # I added spaces to " > " to try and force it to render
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.button(" < ", on_click=add_to_input, args=("<",))
+    c2.button(" > ", on_click=add_to_input, args=(">",)) 
+    c3.button(" ≤ ", on_click=add_to_input, args=("<=",))
+    c4.button(" ≥ ", on_click=add_to_input, args=(">=",))
+    # Fillers for 5 and 6
+    c5.markdown("") 
+    c6.markdown("")
 
 st.markdown("---")
 
