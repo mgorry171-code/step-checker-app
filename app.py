@@ -1,7 +1,6 @@
 import streamlit as st
 import sympy
 from sympy import symbols, sympify, solve, Eq, latex, N, reduce_inequalities
-from sympy.core.numbers import Integer, Float, Rational
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application
 import datetime
 import pandas as pd
@@ -9,7 +8,7 @@ import re
 
 # --- SETUP SESSION STATE ---
 if 'line_prev' not in st.session_state:
-    st.session_state.line_prev = "x + 4 = 10"
+    st.session_state.line_prev = "2x = 10" # Changed default to test division logic
 if 'line_curr' not in st.session_state:
     st.session_state.line_curr = ""
 if 'history' not in st.session_state:
@@ -93,38 +92,19 @@ def get_solution_set(text_str):
     except Exception as e:
         return None
 
-# --- NEW: SIMPLIFICATION CHECKER ---
 def check_simplification(text):
-    """
-    Returns True if the expression is likely simplified (just a number).
-    Returns False if it looks like unfinished math (10-4, 5*2, etc).
-    """
     try:
         clean = clean_input(text)
-        # Parse WITHOUT evaluating (keep 10-4 as 10-4, don't turn it into 6)
         expr = smart_parse(clean, evaluate=False)
-        
-        # If it's an equation x = 10-4, look at the Right Hand Side
-        if isinstance(expr, Eq):
-            rhs = expr.rhs
-        else:
-            rhs = expr
-            
-        # If the RHS is just a raw number (Integer, Float) or symbol (x), it's simplified.
-        if rhs.is_Number or rhs.is_Symbol:
-            return True
-            
-        # If it's a negative number like -6, SymPy sometimes treats it as Mul(-1, 6)
-        # We need to allow that.
-        if rhs.is_Mul and len(rhs.args) == 2 and rhs.args[0] == -1 and rhs.args[1].is_Number:
-            return True
-            
-        # Otherwise, it involves an operation (Add, Mul, Pow) -> Unsimplified
+        if isinstance(expr, Eq): rhs = expr.rhs
+        else: rhs = expr
+        if rhs.is_Number or rhs.is_Symbol: return True
+        if rhs.is_Mul and len(rhs.args) == 2 and rhs.args[0] == -1 and rhs.args[1].is_Number: return True
         return False
     except:
-        return True # Default to True if we can't tell, to avoid false alarms
+        return True
 
-# --- DIAGNOSTIC BRAIN v3.1 ---
+# --- DIAGNOSTIC BRAIN v3.4 (Pedagogical Update) ---
 def diagnose_error(set_correct, set_user):
     debug_log = []
     try:
@@ -142,14 +122,14 @@ def diagnose_error(set_correct, set_user):
             for x in set_correct:
                 val = extract_number(x)
                 if val is not None: c_vals.append(val)
-        except: return "Logic error.", "Iterate Fail"
+        except: return "Logic error.", "Iterate Fail A"
         
         u_vals = []
         try:
             for x in set_user:
                 val = extract_number(x)
                 if val is not None: u_vals.append(val)
-        except: return "Logic error.", "Iterate Fail"
+        except: return "Logic error.", "Iterate Fail B"
             
         debug_log.append(f"Extracted A: {c_vals}")
         debug_log.append(f"Extracted B: {u_vals}")
@@ -160,18 +140,30 @@ def diagnose_error(set_correct, set_user):
         c = c_vals[0]
         u = u_vals[0]
 
+        # 1. SIGN ERROR (The Classic)
         if abs(u) == abs(c) and u != c:
             return "Check your signs (pos/neg).", str(debug_log)
 
-        diff = u - c
-        if 0 < abs(diff) <= 10:
-            if abs(diff - round(diff)) < 0.001:
-                return f"Close! You are off by {int(round(diff))}.", str(debug_log)
-            else:
-                return f"Close! You are off by {round(diff, 2)}.", str(debug_log)
-
+        # 2. FRACTION FLIP (Reciprocal)
         if c != 0 and abs(u - (1/c)) < 0.001:
             return "Did you flip the fraction?", str(debug_log)
+
+        # 3. FAKE MULTIPLICATION (The Square Rule)
+        # If u/c is a perfect square (4, 9, 16, 25...), they likely multiplied instead of divided.
+        if c != 0:
+            ratio = u / c
+            # Check if ratio is roughly an integer (e.g. 4.0)
+            if abs(ratio - round(ratio)) < 0.001:
+                r_int = int(round(ratio))
+                # Check if it's a significant square (2^2, 3^2, 4^2...)
+                if r_int in [4, 9, 16, 25, 36, 49, 100]:
+                     return "Did you multiply instead of divide?", str(debug_log)
+
+        # 4. ARITHMETIC SLIP (Pedagogical Fix)
+        # Instead of "Off by 3", we just say "Check your arithmetic"
+        diff = u - c
+        if 0 < abs(diff) <= 10:
+             return "Check your arithmetic. You are close!", str(debug_log)
 
         return "Logic error.", str(debug_log)
 
@@ -193,9 +185,7 @@ def validate_step(line_prev_str, line_curr_str):
         if set_A is None and line_prev_str: return False, "Could not solve Line A", "", debug_info
         if set_B is None: return False, "Could not parse Line B", "", debug_info
 
-        # --- VALIDATION LOGIC ---
         if set_A == set_B:
-            # NEW: Check if simplified!
             is_simple = check_simplification(line_curr_str)
             if is_simple:
                 return True, "Valid", "", debug_info
@@ -205,7 +195,7 @@ def validate_step(line_prev_str, line_curr_str):
         hint, internal_debug = diagnose_error(set_A, set_B)
         debug_info['Internal X-Ray'] = internal_debug
         
-        if "Check your" in hint or "Close!" in hint or "flip" in hint:
+        if "Check your" in hint or "Close!" in hint or "flip" in hint or "multiply" in hint:
              pass
         elif set_B.is_subset(set_A) and not set_B.is_empty: 
              return True, "Partial", "", debug_info
@@ -217,7 +207,7 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v3.3", page_icon="🧪")
+st.set_page_config(page_title="The Logic Lab v3.4", page_icon="🧪")
 st.title("🧪 The Logic Lab")
 
 with st.sidebar:
@@ -284,7 +274,6 @@ if st.button("Check Logic", type="primary"):
         st.success("✅ **Perfect Logic!**")
         st.balloons()
     elif is_valid and status == "Unsimplified":
-        # NEW STATE: YELLOW WARNING
         st.warning("⚠️ **Correct, but not fully simplified.**")
         st.info("💡 **Hint:** Perform the arithmetic (e.g., 10-4).")
     elif is_valid and status == "Partial":
