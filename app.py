@@ -8,7 +8,7 @@ import re
 
 # --- SETUP SESSION STATE ---
 if 'line_prev' not in st.session_state:
-    st.session_state.line_prev = "x + 4 = 10" # Changed default to test simple math
+    st.session_state.line_prev = "x + 4 = 10"
 if 'line_curr' not in st.session_state:
     st.session_state.line_curr = ""
 if 'history' not in st.session_state:
@@ -25,7 +25,7 @@ def add_to_input(text_to_add):
 
 def clean_input(text):
     text = text.lower()
-    text = re.sub(r'(\d),(\d{3})', r'\1\2', text) # Thousands
+    text = re.sub(r'(\d),(\d{3})', r'\1\2', text)
     text = re.sub(r'(\d),(\d{3})', r'\1\2', text)
     text = text.replace(" and ", ",")
     text = text.replace("^", "**")
@@ -88,43 +88,51 @@ def get_solution_set(text_str):
     except Exception as e:
         return None
 
-# --- NEW: DIAGNOSTIC BRAIN 🧠 ---
+# --- IMPROVED DIAGNOSTIC BRAIN 🧠 ---
 def diagnose_error(set_correct, set_user):
     """
-    Compares the Correct Set and User Set to guess the specific mistake.
+    Bulletproof comparison logic.
     """
     try:
-        # We only diagnose FiniteSets (specific numbers) for now, not Intervals
-        if not isinstance(set_correct, sympy.FiniteSet) or not isinstance(set_user, sympy.FiniteSet):
-            return "Logic Error."
-        
-        # Convert to simple lists of floats for comparison
-        correct_vals = [float(N(x)) for x in set_correct]
-        user_vals = [float(N(x)) for x in set_user]
-        
-        if not correct_vals or not user_vals: return "Logic Error."
+        # Safely convert SymPy sets to simple Python lists of floats
+        # This prevents crashes with complex numbers or weird formats
+        c_vals = []
+        for item in set_correct:
+            try: c_vals.append(float(sympy.re(N(item)))) # Force to Real Number
+            except: pass
+            
+        u_vals = []
+        for item in set_user:
+            try: u_vals.append(float(sympy.re(N(item))))
+            except: pass
 
-        # Check 1: SIGN ERROR (e.g. 5 vs -5)
-        # If the user has the right number but wrong sign
-        if abs(user_vals[0]) == abs(correct_vals[0]) and user_vals[0] != correct_vals[0]:
-            return "Check your signs (pos/neg)."
+        # If we couldn't extract numbers, we can't diagnose
+        if not c_vals or not u_vals: 
+            return "Values do not match."
 
-        # Check 2: ARITHMETIC SLIP (e.g. 10 vs 12)
-        # If they are within a small number (like 10) of the answer
-        diff = user_vals[0] - correct_vals[0]
-        if 0 < abs(diff) < 10 and diff.is_integer():
-            return f"Close! You are off by {int(diff)}."
+        # Compare the first answer found (Simplifying assumption for single-var algebra)
+        c = c_vals[0]
+        u = u_vals[0]
+        
+        # Check 1: SIGN ERROR (e.g. 6 vs -6)
+        if abs(u) == abs(c) and u != c:
+            return "Check your signs (positive/negative)."
+
+        # Check 2: OFF BY ARITHMETIC (e.g. 10 vs 12)
+        diff = u - c
+        # If difference is small (<= 10) and nearly an integer
+        if 0 < abs(diff) <= 10 and abs(diff - round(diff)) < 0.001:
+             return f"Close! You are off by {int(round(diff))}."
 
         # Check 3: RECIPROCAL ERROR (e.g. 2 vs 0.5)
-        # Did they flip the fraction?
-        if correct_vals[0] != 0 and user_vals[0] == 1/correct_vals[0]:
-            return "Did you flip the fraction?"
+        if c != 0 and abs(u - (1/c)) < 0.001:
+             return "Did you flip the fraction?"
+             
+        return "Values do not match."
 
-        return "Logic Error."
-
-    except:
-        return "Logic Error."
-
+    except Exception:
+        # Even if the diagnostic crashes, return a generic hint string
+        return "Check your math logic."
 
 def validate_step(line_prev_str, line_curr_str):
     try:
@@ -148,8 +156,8 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v2.5", page_icon="🧪")
-st.title("🧪 The Logic Lab (v2.5)")
+st.set_page_config(page_title="The Logic Lab v2.6", page_icon="🧪")
+st.title("🧪 The Logic Lab (v2.6)")
 
 with st.sidebar:
     st.header("📝 Session Log")
