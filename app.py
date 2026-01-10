@@ -8,7 +8,7 @@ import re
 
 # --- SETUP SESSION STATE ---
 if 'line_prev' not in st.session_state:
-    st.session_state.line_prev = "2x + 5 < 15"
+    st.session_state.line_prev = "x + 4 = 10" # Changed default to test simple math
 if 'line_curr' not in st.session_state:
     st.session_state.line_curr = ""
 if 'history' not in st.session_state:
@@ -25,7 +25,7 @@ def add_to_input(text_to_add):
 
 def clean_input(text):
     text = text.lower()
-    text = re.sub(r'(\d),(\d{3})', r'\1\2', text)
+    text = re.sub(r'(\d),(\d{3})', r'\1\2', text) # Thousands
     text = re.sub(r'(\d),(\d{3})', r'\1\2', text)
     text = text.replace(" and ", ",")
     text = text.replace("^", "**")
@@ -88,25 +88,68 @@ def get_solution_set(text_str):
     except Exception as e:
         return None
 
+# --- NEW: DIAGNOSTIC BRAIN 🧠 ---
+def diagnose_error(set_correct, set_user):
+    """
+    Compares the Correct Set and User Set to guess the specific mistake.
+    """
+    try:
+        # We only diagnose FiniteSets (specific numbers) for now, not Intervals
+        if not isinstance(set_correct, sympy.FiniteSet) or not isinstance(set_user, sympy.FiniteSet):
+            return "Logic Error."
+        
+        # Convert to simple lists of floats for comparison
+        correct_vals = [float(N(x)) for x in set_correct]
+        user_vals = [float(N(x)) for x in set_user]
+        
+        if not correct_vals or not user_vals: return "Logic Error."
+
+        # Check 1: SIGN ERROR (e.g. 5 vs -5)
+        # If the user has the right number but wrong sign
+        if abs(user_vals[0]) == abs(correct_vals[0]) and user_vals[0] != correct_vals[0]:
+            return "Check your signs (pos/neg)."
+
+        # Check 2: ARITHMETIC SLIP (e.g. 10 vs 12)
+        # If they are within a small number (like 10) of the answer
+        diff = user_vals[0] - correct_vals[0]
+        if 0 < abs(diff) < 10 and diff.is_integer():
+            return f"Close! You are off by {int(diff)}."
+
+        # Check 3: RECIPROCAL ERROR (e.g. 2 vs 0.5)
+        # Did they flip the fraction?
+        if correct_vals[0] != 0 and user_vals[0] == 1/correct_vals[0]:
+            return "Did you flip the fraction?"
+
+        return "Logic Error."
+
+    except:
+        return "Logic Error."
+
+
 def validate_step(line_prev_str, line_curr_str):
     try:
-        if not line_prev_str or not line_curr_str: return False, "Empty"
+        if not line_prev_str or not line_curr_str: return False, "Empty", ""
+        
         set_A = get_solution_set(line_prev_str)
         set_B = get_solution_set(line_curr_str)
         
-        if set_A is None and line_prev_str: return False, "Could not solve Line A"
-        if set_B is None: return False, "Could not parse Line B"
+        if set_A is None and line_prev_str: return False, "Could not solve Line A", ""
+        if set_B is None: return False, "Could not parse Line B", ""
 
-        if set_A == set_B: return True, "Valid"
-        if set_B.is_subset(set_A) and not set_B.is_empty: return True, "Partial"
-        return False, "Invalid"
+        if set_A == set_B: return True, "Valid", ""
+        if set_B.is_subset(set_A) and not set_B.is_empty: return True, "Partial", ""
+        
+        # If Invalid, RUN DIAGNOSTICS
+        hint = diagnose_error(set_A, set_B)
+        return False, "Invalid", hint
+
     except Exception as e:
-        return False, f"Syntax Error: {e}"
+        return False, f"Syntax Error: {e}", ""
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v2.4", page_icon="🧪")
-st.title("🧪 The Logic Lab (v2.4)")
+st.set_page_config(page_title="The Logic Lab v2.5", page_icon="🧪")
+st.title("🧪 The Logic Lab (v2.5)")
 
 with st.sidebar:
     st.header("📝 Session Log")
@@ -136,10 +179,9 @@ st.markdown("---")
 # --- COLLAPSIBLE KEYPAD ---
 with st.expander("⌨️ Show Math Keypad", expanded=False):
     st.write("Click a button to add it to the **" + st.session_state.keypad_target + "**.")
-    
     st.radio("Target:", ["Previous Line", "Current Line"], horizontal=True, key="keypad_target", label_visibility="collapsed")
     st.write("") 
-
+    
     # Row 1
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.button("x²", on_click=add_to_input, args=("^2",))
@@ -149,10 +191,9 @@ with st.expander("⌨️ Show Math Keypad", expanded=False):
     c5.button("±", on_click=add_to_input, args=("+/-",))
     c6.button("÷", on_click=add_to_input, args=("/",))
 
-    # Row 2 (Inequalities)
+    # Row 2
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.button(" < ", on_click=add_to_input, args=("<",))
-    # THE FIX: I added a backslash "\" before the > so Markdown doesn't eat it!
     c2.button("\>", on_click=add_to_input, args=(">",)) 
     c3.button(" ≤ ", on_click=add_to_input, args=("<=",))
     c4.button(" ≥ ", on_click=add_to_input, args=(">=",))
@@ -165,11 +206,11 @@ if st.button("Check Logic", type="primary"):
     line_a = st.session_state.line_prev
     line_b = st.session_state.line_curr
     
-    is_valid, status = validate_step(line_a, line_b)
+    is_valid, status, hint = validate_step(line_a, line_b)
     
     now = datetime.datetime.now().strftime("%H:%M:%S")
     st.session_state.history.append({
-        "Time": now, "Input A": line_a, "Input B": line_b, "Result": status
+        "Time": now, "Input A": line_a, "Input B": line_b, "Result": status, "Hint": hint
     })
     
     if is_valid and status == "Valid":
@@ -179,6 +220,8 @@ if st.button("Check Logic", type="primary"):
         st.warning("⚠️ **Technically Correct, but Incomplete.**")
     else:
         st.error("❌ **Logic Break**")
+        if hint:
+            st.info(f"💡 **Hint:** {hint}")
 
 st.markdown("---")
 st.markdown(
