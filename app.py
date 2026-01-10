@@ -1,18 +1,3 @@
-It seems the "onion peeler" (the unpacking logic) is still failing to grab the number inside the tuple, or diagnose_error is returning a generic message that isn't displaying as a distinct hint.
-
-The fact that you see {(6,)} means the computer definitely has the data, it's just trapped in that format.
-
-I am writing v3.0 (The X-Ray Update). I have modified the "Developer Debugger" to show you the Internal Brain Scan. It will tell us exactly what numbers the "Diagnostic Engine" successfully extracted (or failed to extract).
-
-Action:
-Edit app.py.
-
-Delete All and paste this code.
-
-Commit and Refresh.
-
-Python
-
 import streamlit as st
 import sympy
 from sympy import symbols, sympify, solve, Eq, latex, N, reduce_inequalities
@@ -291,3 +276,4 @@ st.markdown(
     """<div style='text-align: center; color: #666;'><small>Built by The Logic Lab 🧪 | © 2026 Step-Checker</small></div>""",
     unsafe_allow_html=True
 )
+
