@@ -45,17 +45,13 @@ def clean_input(text):
 def smart_parse(text, evaluate=True):
     transformations = (standard_transformations + (implicit_multiplication_application,))
     try:
-        # Check for Inequality operators
         if "<=" in text or ">=" in text or "<" in text or ">" in text:
             return parse_expr(text, transformations=transformations, evaluate=evaluate)
-            
-        # Check for Equation (=)
         elif "=" in text:
             parts = text.split("=")
             lhs = parse_expr(parts[0], transformations=transformations, evaluate=evaluate)
             rhs = parse_expr(parts[1], transformations=transformations, evaluate=evaluate)
             return Eq(lhs, rhs)
-            
         else:
             return parse_expr(text, transformations=transformations, evaluate=evaluate)
     except:
@@ -74,20 +70,14 @@ def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
 def get_solution_set(text_str):
-    """
-    Solves Equations AND Inequalities. Returns a SymPy Set.
-    """
     x = symbols('x')
     clean = clean_input(text_str)
     
     try:
-        # Case A: "+/-" syntax
         if "±" in clean:
             parts = clean.split("±")
             val = smart_parse(parts[1].strip(), evaluate=True)
             return sympy.FiniteSet(val, -val)
-            
-        # Case B: Comma list (FiniteSet)
         elif "," in clean:
             rhs = clean.split("=")[1] if "=" in clean else clean
             items = rhs.split(",")
@@ -96,21 +86,14 @@ def get_solution_set(text_str):
                 if i.strip():
                     vals.append(smart_parse(i.strip(), evaluate=True))
             return sympy.FiniteSet(*vals)
-            
-        # Case C: Single Expression/Equation/Inequality
         else:
             expr = smart_parse(clean, evaluate=True)
-            
-            # If it's an Equation or Expression
             if isinstance(expr, Eq) or not (expr.is_Relational):
                 if not isinstance(expr, Eq): pass 
                 return sympy.solve(expr, x, set=True)[1] 
-            
-            # If it's an Inequality
             else:
                 solution = reduce_inequalities(expr, x)
                 return solution.as_set()
-                
     except Exception as e:
         return None
 
@@ -125,13 +108,8 @@ def validate_step(line_prev_str, line_curr_str):
         if set_A is None and line_prev_str: return False, "Could not solve Line A"
         if set_B is None: return False, "Could not parse Line B"
 
-        # 1. Exact Set Match
-        if set_A == set_B:
-            return True, "Valid"
-        
-        # 2. Subset (Partial Credit)
-        if set_B.is_subset(set_A) and not set_B.is_empty:
-            return True, "Partial"
+        if set_A == set_B: return True, "Valid"
+        if set_B.is_subset(set_A) and not set_B.is_empty: return True, "Partial"
             
         return False, "Invalid"
 
@@ -140,8 +118,8 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v2.1", page_icon="🧪")
-st.title("🧪 The Logic Lab (v2.1)")
+st.set_page_config(page_title="The Logic Lab v2.2", page_icon="🧪")
+st.title("🧪 The Logic Lab (v2.2)")
 
 with st.sidebar:
     st.header("📝 Session Log")
@@ -171,15 +149,25 @@ with col2:
 st.markdown("---")
 st.radio("Keypad Target:", ["Previous Line", "Current Line"], horizontal=True, key="keypad_target", label_visibility="visible")
 
-# --- UPDATED KEYPAD (6 COLUMNS) ---
+# --- UPDATED KEYPAD (2 ROWS) ---
 st.markdown("##### ⌨️ Quick Keys")
-k1, k2, k3, k4, k5, k6 = st.columns(6) # 6 Columns now
-k1.button("x²", on_click=add_to_input, args=("^2",)) 
-k2.button("±", on_click=add_to_input, args=("+/-",)) 
-k3.button("<", on_click=add_to_input, args=("<",))  # Added Less Than
-k4.button(">", on_click=add_to_input, args=(">",)) 
-k5.button("≤", on_click=add_to_input, args=("<=",)) 
-k6.button("≥", on_click=add_to_input, args=(">=",)) 
+
+# ROW 1: Operations
+r1_c1, r1_c2, r1_c3, r1_c4, r1_c5 = st.columns(5)
+r1_c1.button("x²", on_click=add_to_input, args=("^2",)) 
+r1_c2.button("|x|", on_click=add_to_input, args=("abs(",)) # Restored!
+r1_c3.button("(", on_click=add_to_input, args=("(",))      # Restored!
+r1_c4.button(")", on_click=add_to_input, args=(")",))      # Restored!
+r1_c5.button("±", on_click=add_to_input, args=("+/-",)) 
+
+# ROW 2: Inequalities
+r2_c1, r2_c2, r2_c3, r2_c4, r2_c5 = st.columns(5)
+r2_c1.button("<", on_click=add_to_input, args=("<",)) 
+r2_c2.button(">", on_click=add_to_input, args=(">",))      # Should be visible now
+r2_c3.button("≤", on_click=add_to_input, args=("<=",)) 
+r2_c4.button("≥", on_click=add_to_input, args=(">=",)) 
+# Empty 5th column in row 2 for spacing balance, or we can add Division back?
+r2_c5.button("÷", on_click=add_to_input, args=("/",))      # Why not?
 
 st.markdown("---")
 
