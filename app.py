@@ -105,8 +105,8 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v2.3", page_icon="🧪")
-st.title("🧪 The Logic Lab (v2.3)")
+st.set_page_config(page_title="The Logic Lab v2.4", page_icon="🧪")
+st.title("🧪 The Logic Lab (v2.4)")
 
 with st.sidebar:
     st.header("📝 Session Log")
@@ -134,14 +134,11 @@ with col2:
 st.markdown("---")
 
 # --- COLLAPSIBLE KEYPAD ---
-# The default is 'expanded=False', so it stays hidden until clicked.
-# You can change to 'expanded=True' if you want it open by default.
 with st.expander("⌨️ Show Math Keypad", expanded=False):
     st.write("Click a button to add it to the **" + st.session_state.keypad_target + "**.")
     
-    # Target Selection inside the menu
     st.radio("Target:", ["Previous Line", "Current Line"], horizontal=True, key="keypad_target", label_visibility="collapsed")
-    st.write("") # Spacer
+    st.write("") 
 
     # Row 1
     c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -153,13 +150,12 @@ with st.expander("⌨️ Show Math Keypad", expanded=False):
     c6.button("÷", on_click=add_to_input, args=("/",))
 
     # Row 2 (Inequalities)
-    # I added spaces to " > " to try and force it to render
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.button(" < ", on_click=add_to_input, args=("<",))
-    c2.button(" > ", on_click=add_to_input, args=(">",)) 
+    # THE FIX: I added a backslash "\" before the > so Markdown doesn't eat it!
+    c2.button("\>", on_click=add_to_input, args=(">",)) 
     c3.button(" ≤ ", on_click=add_to_input, args=("<=",))
     c4.button(" ≥ ", on_click=add_to_input, args=(">=",))
-    # Fillers for 5 and 6
     c5.markdown("") 
     c6.markdown("")
 
