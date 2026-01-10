@@ -66,13 +66,10 @@ def get_solution_set(text_str):
     x = symbols('x')
     clean = clean_input(text_str)
     try:
-        # Case A: "+/-" syntax
         if "±" in clean:
             parts = clean.split("±")
             val = smart_parse(parts[1].strip(), evaluate=True)
             return sympy.FiniteSet(val, -val)
-            
-        # Case B: Comma list
         elif "," in clean:
             rhs = clean.split("=")[1] if "=" in clean else clean
             items = rhs.split(",")
@@ -82,19 +79,12 @@ def get_solution_set(text_str):
             return sympy.FiniteSet(*vals)
         else:
             expr = smart_parse(clean, evaluate=True)
-            
-            # Case C: It's just a number or expression (e.g. "7" or "x+4")
-            # If it's NOT an equation (=) and NOT an inequality (<, >)
             if not isinstance(expr, Eq) and not expr.is_Relational:
-                 # If it has 'x' in it, treat as expression to solve? 
-                 # Or if it's just "7", treat as the value {7}.
                  if 'x' not in str(expr):
                      return sympy.FiniteSet(expr)
             
-            # Case D: Equation or Inequality
             if isinstance(expr, Eq) or not (expr.is_Relational):
                 if not isinstance(expr, Eq): pass 
-                # solve returns a set of TUPLES sometimes: {(6,)}
                 sol = sympy.solve(expr, x, set=True)
                 return sol[1] 
             else:
@@ -103,29 +93,33 @@ def get_solution_set(text_str):
     except Exception as e:
         return None
 
-# --- FIXED DIAGNOSTIC BRAIN 🧠 ---
+# --- FIXED DIAGNOSTIC BRAIN (v2.9) 🧠 ---
 def diagnose_error(set_correct, set_user):
     try:
         if not isinstance(set_correct, sympy.FiniteSet) or not isinstance(set_user, sympy.FiniteSet):
             return "Inequality logic mismatch."
 
-        # THE ONION PEELER: Handle {(6,)} vs {6}
+        # THE FIX: AGGRESSIVE UNPACKING
         def extract_number(val):
-            # If it's a tuple (6,), get the first item
-            if isinstance(val, tuple):
-                return float(val[0])
-            # If it's a raw number, convert to float
-            return float(val)
+            try:
+                # Attempt 1: Just convert to float (Works for -6)
+                return float(val)
+            except:
+                # Attempt 2: If it fails, it's likely a tuple (6,). Grab index 0.
+                try:
+                    return float(val[0])
+                except:
+                    return None
 
         c_vals = []
         for x in set_correct:
-            try: c_vals.append(extract_number(x)) 
-            except: pass
+            val = extract_number(x)
+            if val is not None: c_vals.append(val)
         
         u_vals = []
         for x in set_user:
-            try: u_vals.append(extract_number(x))
-            except: pass
+            val = extract_number(x)
+            if val is not None: u_vals.append(val)
         
         if not c_vals or not u_vals: return "Check your values."
 
@@ -170,17 +164,13 @@ def validate_step(line_prev_str, line_curr_str):
 
         if set_A == set_B: return True, "Valid", "", debug_info
         
-        # New: Compare values directly if Sets didn't match perfectly (handles (6,) vs 6 mismatch)
-        # This is a backup validation check
+        # New: Compare values directly if Sets didn't match perfectly
         hint = diagnose_error(set_A, set_B)
-        if hint == "Logic error." or "Check your" in hint or "Close!" in hint:
-             # If diagnostics ran without crashing, we know it's invalid
+        if "Check your" in hint or "Close!" in hint or "flip" in hint:
+             # Logic is definitely invalid, but we have a good hint
              pass
-        else:
-             # Sometimes the diagnostic might fail, but let's check subset logic
-             pass
-
-        if set_B.is_subset(set_A) and not set_B.is_empty: return True, "Partial", "", debug_info
+        elif set_B.is_subset(set_A) and not set_B.is_empty: 
+             return True, "Partial", "", debug_info
         
         return False, "Invalid", hint, debug_info
 
@@ -189,8 +179,8 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v2.8", page_icon="🧪")
-st.title("🧪 The Logic Lab (v2.8)")
+st.set_page_config(page_title="The Logic Lab v2.9", page_icon="🧪")
+st.title("🧪 The Logic Lab (v2.9)")
 
 with st.sidebar:
     st.header("📝 Session Log")
