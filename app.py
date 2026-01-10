@@ -4,10 +4,11 @@ from sympy import symbols, sympify, solve, Eq, latex, N
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application
 import datetime
 import pandas as pd
+import re # NEW: Library for pattern matching (Regex)
 
 # --- SETUP SESSION STATE ---
 if 'line_prev' not in st.session_state:
-    st.session_state.line_prev = "x + 4 = 10"
+    st.session_state.line_prev = "900 + 100 = x"
 if 'line_curr' not in st.session_state:
     st.session_state.line_curr = ""
 if 'history' not in st.session_state:
@@ -24,6 +25,13 @@ def add_to_input(text_to_add):
 
 def clean_input(text):
     text = text.lower()
+    
+    # NEW: Remove thousands separators (e.g., 1,000 -> 1000)
+    # Logic: Look for a digit, a comma, and exactly 3 digits
+    text = re.sub(r'(\d),(\d{3})', r'\1\2', text)
+    # Run it twice to catch millions (1,000,000 -> 1000,000 -> 1000000)
+    text = re.sub(r'(\d),(\d{3})', r'\1\2', text)
+
     text = text.replace(" and ", ",")
     text = text.replace("^", "**")
     text = text.replace("+/-", "±")
@@ -32,16 +40,10 @@ def clean_input(text):
     return text
 
 def smart_parse(text, evaluate=True):
-    """
-    Parses text into SymPy expressions. 
-    Critically, it must handle '=' splitting even if evaluate=False (Preview Mode).
-    """
     transformations = (standard_transformations + (implicit_multiplication_application,))
     try:
-        # ALWAYS check for equation splitting first
         if "=" in text:
             parts = text.split("=")
-            # Parse LHS and RHS separately
             lhs_text = parts[0].strip()
             rhs_text = parts[1].strip()
             
@@ -49,17 +51,14 @@ def smart_parse(text, evaluate=True):
             rhs = parse_expr(rhs_text, transformations=transformations, evaluate=evaluate)
             return Eq(lhs, rhs)
         else:
-            # No equals sign, just an expression
             return parse_expr(text, transformations=transformations, evaluate=evaluate)
     except:
-        # Fallback
         return sympify(text, evaluate=evaluate)
 
 def pretty_print(math_str):
     try:
         clean_str = clean_input(math_str)
         clean_str = clean_str.replace("±", "±")
-        # evaluate=False keeps things like |-4| visually intact
         expr = smart_parse(clean_str, evaluate=False)
         return latex(expr)
     except:
@@ -80,6 +79,8 @@ def extract_values(text_str):
             vals.add(val)
             vals.add(-val)
         elif "," in clean:
+            # Note: 1,000 has already been cleaned to 1000 by clean_input
+            # So this comma check only catches actual lists like "4, -4"
             rhs = clean.split("=")[1] if "=" in clean else clean
             items = rhs.split(",")
             for i in items:
@@ -142,13 +143,10 @@ def validate_step(line_prev_str, line_curr_str):
     except Exception as e:
         return False, f"Syntax Error: {e}"
 
-def diagnose_error(line_prev_str, line_curr_str):
-    return "Check your math logic."
-
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="Step-Checker v1.7", page_icon="🧮")
-st.title("🧮 Step-Checker v1.7")
+st.set_page_config(page_title="Step-Checker v1.8", page_icon="🧮")
+st.title("🧮 Step-Checker v1.8")
 
 with st.sidebar:
     st.header("📝 Session Log")
@@ -176,7 +174,6 @@ with col2:
         st.latex(pretty_print(st.session_state.line_curr))
 
 st.markdown("---")
-# Keypad Target
 st.radio("Keypad Target:", ["Previous Line", "Current Line"], horizontal=True, key="keypad_target", label_visibility="visible")
 
 st.markdown("##### ⌨️ Quick Keys")
@@ -210,7 +207,6 @@ if st.button("Check Logic", type="primary"):
     else:
         st.error("❌ **Logic Break**")
 
-# --- FOOTER ---
 st.markdown("---")
 st.markdown(
     """<div style='text-align: center; color: #666;'><small>Built by The Logic Lab 🧪 | © 2026 Step-Checker</small></div>""",
