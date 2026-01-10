@@ -1,3 +1,18 @@
+It seems the "onion peeler" (the unpacking logic) is still failing to grab the number inside the tuple, or diagnose_error is returning a generic message that isn't displaying as a distinct hint.
+
+The fact that you see {(6,)} means the computer definitely has the data, it's just trapped in that format.
+
+I am writing v3.0 (The X-Ray Update). I have modified the "Developer Debugger" to show you the Internal Brain Scan. It will tell us exactly what numbers the "Diagnostic Engine" successfully extracted (or failed to extract).
+
+Action:
+Edit app.py.
+
+Delete All and paste this code.
+
+Commit and Refresh.
+
+Python
+
 import streamlit as st
 import sympy
 from sympy import symbols, sympify, solve, Eq, latex, N, reduce_inequalities
@@ -82,7 +97,6 @@ def get_solution_set(text_str):
             if not isinstance(expr, Eq) and not expr.is_Relational:
                  if 'x' not in str(expr):
                      return sympy.FiniteSet(expr)
-            
             if isinstance(expr, Eq) or not (expr.is_Relational):
                 if not isinstance(expr, Eq): pass 
                 sol = sympy.solve(expr, x, set=True)
@@ -93,23 +107,28 @@ def get_solution_set(text_str):
     except Exception as e:
         return None
 
-# --- FIXED DIAGNOSTIC BRAIN (v2.9) 🧠 ---
+# --- DIAGNOSTIC BRAIN v3.0 (X-Ray Mode) ---
 def diagnose_error(set_correct, set_user):
+    # We return a TUPLE now: (Hint String, Debug info String)
+    debug_log = []
     try:
         if not isinstance(set_correct, sympy.FiniteSet) or not isinstance(set_user, sympy.FiniteSet):
-            return "Inequality logic mismatch."
+            return "Inequality logic mismatch.", "Not FiniteSets"
 
-        # THE FIX: AGGRESSIVE UNPACKING
         def extract_number(val):
-            try:
-                # Attempt 1: Just convert to float (Works for -6)
-                return float(val)
-            except:
-                # Attempt 2: If it fails, it's likely a tuple (6,). Grab index 0.
-                try:
-                    return float(val[0])
-                except:
-                    return None
+            # Attempt 1: Direct Float
+            try: return float(val)
+            except: pass
+            
+            # Attempt 2: Tuple Indexing (val[0])
+            try: return float(val[0])
+            except: pass
+            
+            # Attempt 3: SymPy Args (val.args[0]) - Most robust for SymPy objects
+            try: return float(val.args[0])
+            except: pass
+            
+            return None
 
         c_vals = []
         for x in set_correct:
@@ -120,32 +139,37 @@ def diagnose_error(set_correct, set_user):
         for x in set_user:
             val = extract_number(x)
             if val is not None: u_vals.append(val)
+            
+        # LOG WHAT WE EXTRACTED
+        debug_log.append(f"Extracted A: {c_vals}")
+        debug_log.append(f"Extracted B: {u_vals}")
         
-        if not c_vals or not u_vals: return "Check your values."
+        if not c_vals or not u_vals: 
+            return "Check your values.", str(debug_log)
 
         c = c_vals[0]
         u = u_vals[0]
 
         # Check: SIGN ERROR
         if abs(u) == abs(c) and u != c:
-            return "Check your signs (pos/neg)."
+            return "Check your signs (pos/neg).", str(debug_log)
 
         # Check: ARITHMETIC
         diff = u - c
         if 0 < abs(diff) <= 10:
             if abs(diff - round(diff)) < 0.001:
-                return f"Close! You are off by {int(round(diff))}."
+                return f"Close! You are off by {int(round(diff))}.", str(debug_log)
             else:
-                return f"Close! You are off by {round(diff, 2)}."
+                return f"Close! You are off by {round(diff, 2)}.", str(debug_log)
 
         # Check: FRACTION FLIP
         if c != 0 and abs(u - (1/c)) < 0.001:
-            return "Did you flip the fraction?"
+            return "Did you flip the fraction?", str(debug_log)
 
-        return "Logic error."
+        return "Logic error.", str(debug_log)
 
     except Exception as e:
-        return f"Diagnostic Error: {e}"
+        return f"Diagnostic Error: {e}", str(debug_log)
 
 
 def validate_step(line_prev_str, line_curr_str):
@@ -156,18 +180,19 @@ def validate_step(line_prev_str, line_curr_str):
         set_A = get_solution_set(line_prev_str)
         set_B = get_solution_set(line_curr_str)
         
-        debug_info['Set A'] = str(set_A)
-        debug_info['Set B'] = str(set_B)
+        debug_info['Raw Set A'] = str(set_A)
+        debug_info['Raw Set B'] = str(set_B)
         
         if set_A is None and line_prev_str: return False, "Could not solve Line A", "", debug_info
         if set_B is None: return False, "Could not parse Line B", "", debug_info
 
         if set_A == set_B: return True, "Valid", "", debug_info
         
-        # New: Compare values directly if Sets didn't match perfectly
-        hint = diagnose_error(set_A, set_B)
+        # Call Diagnostics
+        hint, internal_debug = diagnose_error(set_A, set_B)
+        debug_info['Internal X-Ray'] = internal_debug
+        
         if "Check your" in hint or "Close!" in hint or "flip" in hint:
-             # Logic is definitely invalid, but we have a good hint
              pass
         elif set_B.is_subset(set_A) and not set_B.is_empty: 
              return True, "Partial", "", debug_info
@@ -179,8 +204,8 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v2.9", page_icon="🧪")
-st.title("🧪 The Logic Lab (v2.9)")
+st.set_page_config(page_title="The Logic Lab v3.0", page_icon="🧪")
+st.title("🧪 The Logic Lab (v3.0)")
 
 with st.sidebar:
     st.header("📝 Session Log")
@@ -248,13 +273,18 @@ if st.button("Check Logic", type="primary"):
         st.warning("⚠️ **Technically Correct, but Incomplete.**")
     else:
         st.error("❌ **Logic Break**")
-        if hint:
+        # IMPORTANT: If we have a hint, show it.
+        # If the hint is generic "Logic error", we can hide it or show it.
+        if hint and hint != "Logic error.":
             st.info(f"💡 **Hint:** {hint}")
             
     if not is_valid:
         with st.expander("🛠️ Developer Debugger"):
-            st.write(f"**Set A:** `{debug_data.get('Set A')}`")
-            st.write(f"**Set B:** `{debug_data.get('Set B')}`")
+            st.write(f"**Raw Set A:** `{debug_data.get('Raw Set A')}`")
+            st.write(f"**Raw Set B:** `{debug_data.get('Raw Set B')}`")
+            st.markdown("---")
+            st.write("**Brain X-Ray (The Extraction):**")
+            st.code(debug_data.get('Internal X-Ray'))
 
 st.markdown("---")
 st.markdown(
