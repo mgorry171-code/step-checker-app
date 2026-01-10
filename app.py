@@ -92,40 +92,45 @@ def get_solution_set(text_str):
     except Exception as e:
         return None
 
-# --- DIAGNOSTIC BRAIN v3.0 (X-Ray Mode) ---
+# --- DIAGNOSTIC BRAIN v3.1 (Universal Reader) ---
 def diagnose_error(set_correct, set_user):
-    # We return a TUPLE now: (Hint String, Debug info String)
     debug_log = []
     try:
-        if not isinstance(set_correct, sympy.FiniteSet) or not isinstance(set_user, sympy.FiniteSet):
-            return "Inequality logic mismatch.", "Not FiniteSets"
-
+        # STEP 1: REMOVED the "isinstance" check.
+        # We assume if we got here, they are some kind of collection (Set, List, Tuple)
+        
         def extract_number(val):
-            # Attempt 1: Direct Float
+            # Attempt 1: It's a raw number
             try: return float(val)
             except: pass
             
-            # Attempt 2: Tuple Indexing (val[0])
+            # Attempt 2: It's a tuple/list (6,) -> 6
             try: return float(val[0])
             except: pass
             
-            # Attempt 3: SymPy Args (val.args[0]) - Most robust for SymPy objects
+            # Attempt 3: It's a SymPy object
             try: return float(val.args[0])
             except: pass
             
             return None
 
         c_vals = []
-        for x in set_correct:
-            val = extract_number(x)
-            if val is not None: c_vals.append(val)
+        # Try to iterate, whatever it is
+        try:
+            for x in set_correct:
+                val = extract_number(x)
+                if val is not None: c_vals.append(val)
+        except:
+            return "Logic error (Cannot read Set A)", "Iterate Fail A"
         
         u_vals = []
-        for x in set_user:
-            val = extract_number(x)
-            if val is not None: u_vals.append(val)
+        try:
+            for x in set_user:
+                val = extract_number(x)
+                if val is not None: u_vals.append(val)
+        except:
+             return "Logic error (Cannot read Set B)", "Iterate Fail B"
             
-        # LOG WHAT WE EXTRACTED
         debug_log.append(f"Extracted A: {c_vals}")
         debug_log.append(f"Extracted B: {u_vals}")
         
@@ -173,7 +178,6 @@ def validate_step(line_prev_str, line_curr_str):
 
         if set_A == set_B: return True, "Valid", "", debug_info
         
-        # Call Diagnostics
         hint, internal_debug = diagnose_error(set_A, set_B)
         debug_info['Internal X-Ray'] = internal_debug
         
@@ -189,8 +193,8 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v3.0", page_icon="🧪")
-st.title("🧪 The Logic Lab (v3.0)")
+st.set_page_config(page_title="The Logic Lab v3.1", page_icon="🧪")
+st.title("🧪 The Logic Lab (v3.1)")
 
 with st.sidebar:
     st.header("📝 Session Log")
@@ -258,8 +262,6 @@ if st.button("Check Logic", type="primary"):
         st.warning("⚠️ **Technically Correct, but Incomplete.**")
     else:
         st.error("❌ **Logic Break**")
-        # IMPORTANT: If we have a hint, show it.
-        # If the hint is generic "Logic error", we can hide it or show it.
         if hint and hint != "Logic error.":
             st.info(f"💡 **Hint:** {hint}")
             
@@ -276,4 +278,3 @@ st.markdown(
     """<div style='text-align: center; color: #666;'><small>Built by The Logic Lab 🧪 | © 2026 Step-Checker</small></div>""",
     unsafe_allow_html=True
 )
-
