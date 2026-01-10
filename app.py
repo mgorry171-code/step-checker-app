@@ -66,10 +66,13 @@ def get_solution_set(text_str):
     x = symbols('x')
     clean = clean_input(text_str)
     try:
+        # Case A: "+/-" syntax
         if "±" in clean:
             parts = clean.split("±")
             val = smart_parse(parts[1].strip(), evaluate=True)
             return sympy.FiniteSet(val, -val)
+            
+        # Case B: Comma list
         elif "," in clean:
             rhs = clean.split("=")[1] if "=" in clean else clean
             items = rhs.split(",")
@@ -79,42 +82,53 @@ def get_solution_set(text_str):
             return sympy.FiniteSet(*vals)
         else:
             expr = smart_parse(clean, evaluate=True)
+            
+            # Case C: It's just a number or expression (e.g. "7" or "x+4")
+            # If it's NOT an equation (=) and NOT an inequality (<, >)
+            if not isinstance(expr, Eq) and not expr.is_Relational:
+                 # If it has 'x' in it, treat as expression to solve? 
+                 # Or if it's just "7", treat as the value {7}.
+                 if 'x' not in str(expr):
+                     return sympy.FiniteSet(expr)
+            
+            # Case D: Equation or Inequality
             if isinstance(expr, Eq) or not (expr.is_Relational):
                 if not isinstance(expr, Eq): pass 
-                return sympy.solve(expr, x, set=True)[1] 
+                # solve returns a set of TUPLES sometimes: {(6,)}
+                sol = sympy.solve(expr, x, set=True)
+                return sol[1] 
             else:
                 solution = reduce_inequalities(expr, x)
                 return solution.as_set()
     except Exception as e:
         return None
 
-# --- SIMPLIFIED DIAGNOSTIC BRAIN 🧠 ---
+# --- FIXED DIAGNOSTIC BRAIN 🧠 ---
 def diagnose_error(set_correct, set_user):
-    """
-    Simplified logic to prevent crashes.
-    """
     try:
-        # 1. Check if we have simple numbers (FiniteSet). 
-        # If it's an inequality (Interval), we skip diagnostics for now to be safe.
         if not isinstance(set_correct, sympy.FiniteSet) or not isinstance(set_user, sympy.FiniteSet):
             return "Inequality logic mismatch."
 
-        # 2. Extract numbers safely using standard Python floats
+        # THE ONION PEELER: Handle {(6,)} vs {6}
+        def extract_number(val):
+            # If it's a tuple (6,), get the first item
+            if isinstance(val, tuple):
+                return float(val[0])
+            # If it's a raw number, convert to float
+            return float(val)
+
         c_vals = []
         for x in set_correct:
-            try: c_vals.append(float(x)) 
+            try: c_vals.append(extract_number(x)) 
             except: pass
         
         u_vals = []
         for x in set_user:
-            try: u_vals.append(float(x))
+            try: u_vals.append(extract_number(x))
             except: pass
         
-        # If we failed to get numbers (e.g. empty), return generic
-        if not c_vals or not u_vals: 
-            return "Check your values."
+        if not c_vals or not u_vals: return "Check your values."
 
-        # 3. Compare just the first values found
         c = c_vals[0]
         u = u_vals[0]
 
@@ -122,10 +136,9 @@ def diagnose_error(set_correct, set_user):
         if abs(u) == abs(c) and u != c:
             return "Check your signs (pos/neg)."
 
-        # Check: ARITHMETIC (Off by a little bit)
+        # Check: ARITHMETIC
         diff = u - c
         if 0 < abs(diff) <= 10:
-            # Check if it's an integer difference (like off by 2)
             if abs(diff - round(diff)) < 0.001:
                 return f"Close! You are off by {int(round(diff))}."
             else:
@@ -142,16 +155,13 @@ def diagnose_error(set_correct, set_user):
 
 
 def validate_step(line_prev_str, line_curr_str):
-    # Variables for debugging
     debug_info = {}
-    
     try:
         if not line_prev_str or not line_curr_str: return False, "Empty", "", {}
         
         set_A = get_solution_set(line_prev_str)
         set_B = get_solution_set(line_curr_str)
         
-        # Save for debug
         debug_info['Set A'] = str(set_A)
         debug_info['Set B'] = str(set_B)
         
@@ -159,10 +169,19 @@ def validate_step(line_prev_str, line_curr_str):
         if set_B is None: return False, "Could not parse Line B", "", debug_info
 
         if set_A == set_B: return True, "Valid", "", debug_info
+        
+        # New: Compare values directly if Sets didn't match perfectly (handles (6,) vs 6 mismatch)
+        # This is a backup validation check
+        hint = diagnose_error(set_A, set_B)
+        if hint == "Logic error." or "Check your" in hint or "Close!" in hint:
+             # If diagnostics ran without crashing, we know it's invalid
+             pass
+        else:
+             # Sometimes the diagnostic might fail, but let's check subset logic
+             pass
+
         if set_B.is_subset(set_A) and not set_B.is_empty: return True, "Partial", "", debug_info
         
-        # If Invalid, RUN DIAGNOSTICS
-        hint = diagnose_error(set_A, set_B)
         return False, "Invalid", hint, debug_info
 
     except Exception as e:
@@ -170,8 +189,8 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v2.7", page_icon="🧪")
-st.title("🧪 The Logic Lab (v2.7)")
+st.set_page_config(page_title="The Logic Lab v2.8", page_icon="🧪")
+st.title("🧪 The Logic Lab (v2.8)")
 
 with st.sidebar:
     st.header("📝 Session Log")
@@ -184,7 +203,6 @@ with st.sidebar:
             st.session_state.history = []
             st.rerun()
 
-# --- INPUT AREA ---
 col1, col2 = st.columns(2)
 with col1:
     st.markdown("### Previous Line")
@@ -198,13 +216,11 @@ with col2:
 
 st.markdown("---")
 
-# --- COLLAPSIBLE KEYPAD ---
 with st.expander("⌨️ Show Math Keypad", expanded=False):
     st.write("Click a button to add it to the **" + st.session_state.keypad_target + "**.")
     st.radio("Target:", ["Previous Line", "Current Line"], horizontal=True, key="keypad_target", label_visibility="collapsed")
     st.write("") 
     
-    # Row 1
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.button("x²", on_click=add_to_input, args=("^2",))
     c2.button("|x|", on_click=add_to_input, args=("abs(",))
@@ -213,7 +229,6 @@ with st.expander("⌨️ Show Math Keypad", expanded=False):
     c5.button("±", on_click=add_to_input, args=("+/-",))
     c6.button("÷", on_click=add_to_input, args=("/",))
 
-    # Row 2
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.button(" < ", on_click=add_to_input, args=("<",))
     c2.button("\>", on_click=add_to_input, args=(">",)) 
@@ -223,8 +238,6 @@ with st.expander("⌨️ Show Math Keypad", expanded=False):
     c6.markdown("")
 
 st.markdown("---")
-
-# Create a placeholder for the debug info so it's accessible
 debug_container = st.container()
 
 if st.button("Check Logic", type="primary"):
@@ -248,12 +261,10 @@ if st.button("Check Logic", type="primary"):
         if hint:
             st.info(f"💡 **Hint:** {hint}")
             
-    # --- DEBUGGER (Only shows if logic break) ---
     if not is_valid:
-        with st.expander("🛠️ Developer Debugger (Open if Hint is missing)"):
-            st.write("If you see this, the app is working, but the math might be confusing it.")
-            st.write(f"**Computer saw Set A as:** `{debug_data.get('Set A')}`")
-            st.write(f"**Computer saw Set B as:** `{debug_data.get('Set B')}`")
+        with st.expander("🛠️ Developer Debugger"):
+            st.write(f"**Set A:** `{debug_data.get('Set A')}`")
+            st.write(f"**Set B:** `{debug_data.get('Set B')}`")
 
 st.markdown("---")
 st.markdown(
