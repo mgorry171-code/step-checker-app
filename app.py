@@ -96,26 +96,16 @@ def get_solution_set(text_str):
 def diagnose_error(set_correct, set_user):
     debug_log = []
     try:
-        # STEP 1: REMOVED the "isinstance" check.
-        # We assume if we got here, they are some kind of collection (Set, List, Tuple)
-        
         def extract_number(val):
-            # Attempt 1: It's a raw number
             try: return float(val)
             except: pass
-            
-            # Attempt 2: It's a tuple/list (6,) -> 6
             try: return float(val[0])
             except: pass
-            
-            # Attempt 3: It's a SymPy object
             try: return float(val.args[0])
             except: pass
-            
             return None
 
         c_vals = []
-        # Try to iterate, whatever it is
         try:
             for x in set_correct:
                 val = extract_number(x)
@@ -140,11 +130,9 @@ def diagnose_error(set_correct, set_user):
         c = c_vals[0]
         u = u_vals[0]
 
-        # Check: SIGN ERROR
         if abs(u) == abs(c) and u != c:
             return "Check your signs (pos/neg).", str(debug_log)
 
-        # Check: ARITHMETIC
         diff = u - c
         if 0 < abs(diff) <= 10:
             if abs(diff - round(diff)) < 0.001:
@@ -152,7 +140,6 @@ def diagnose_error(set_correct, set_user):
             else:
                 return f"Close! You are off by {round(diff, 2)}.", str(debug_log)
 
-        # Check: FRACTION FLIP
         if c != 0 and abs(u - (1/c)) < 0.001:
             return "Did you flip the fraction?", str(debug_log)
 
@@ -193,19 +180,26 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v3.1", page_icon="🧪")
-st.title("🧪 The Logic Lab (v3.1)")
+st.set_page_config(page_title="The Logic Lab v3.2", page_icon="🧪")
+st.title("🧪 The Logic Lab")
 
+# --- SIDEBAR & HIDDEN CONTROLS ---
 with st.sidebar:
-    st.header("📝 Session Log")
+    st.header("Settings")
+    
+    # HISTORY
     if st.session_state.history:
         st.write(f"Problems Checked: **{len(st.session_state.history)}**")
         df = pd.DataFrame(st.session_state.history)
         csv = convert_df_to_csv(df)
-        st.download_button("📊 Download Excel/CSV", csv, "Math_Session.csv", "text/csv")
+        st.download_button("📊 Download Session Data", csv, "Math_Session.csv", "text/csv")
         if st.button("Clear History"):
             st.session_state.history = []
             st.rerun()
+            
+    st.markdown("---")
+    # THE TOGGLE: Hidden by default!
+    show_debug = st.checkbox("🛠️ Engineer Mode", value=False)
 
 col1, col2 = st.columns(2)
 with col1:
@@ -242,7 +236,6 @@ with st.expander("⌨️ Show Math Keypad", expanded=False):
     c6.markdown("")
 
 st.markdown("---")
-debug_container = st.container()
 
 if st.button("Check Logic", type="primary"):
     line_a = st.session_state.line_prev
@@ -265,13 +258,13 @@ if st.button("Check Logic", type="primary"):
         if hint and hint != "Logic error.":
             st.info(f"💡 **Hint:** {hint}")
             
-    if not is_valid:
-        with st.expander("🛠️ Developer Debugger"):
-            st.write(f"**Raw Set A:** `{debug_data.get('Raw Set A')}`")
-            st.write(f"**Raw Set B:** `{debug_data.get('Raw Set B')}`")
-            st.markdown("---")
-            st.write("**Brain X-Ray (The Extraction):**")
-            st.code(debug_data.get('Internal X-Ray'))
+    # ONLY SHOW DEBUGGER IF TOGGLE IS ON
+    if not is_valid and show_debug:
+        st.markdown("---")
+        st.write("🛠️ **Debug X-Ray:**")
+        st.write(f"**Raw Set A:** `{debug_data.get('Raw Set A')}`")
+        st.write(f"**Raw Set B:** `{debug_data.get('Raw Set B')}`")
+        st.code(debug_data.get('Internal X-Ray'))
 
 st.markdown("---")
 st.markdown(
