@@ -1,6 +1,7 @@
 import streamlit as st
 import sympy
 from sympy import symbols, sympify, solve, Eq, latex, N, reduce_inequalities
+from sympy.core.numbers import Integer, Float, Rational
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application
 import datetime
 import pandas as pd
@@ -92,7 +93,38 @@ def get_solution_set(text_str):
     except Exception as e:
         return None
 
-# --- DIAGNOSTIC BRAIN v3.1 (Universal Reader) ---
+# --- NEW: SIMPLIFICATION CHECKER ---
+def check_simplification(text):
+    """
+    Returns True if the expression is likely simplified (just a number).
+    Returns False if it looks like unfinished math (10-4, 5*2, etc).
+    """
+    try:
+        clean = clean_input(text)
+        # Parse WITHOUT evaluating (keep 10-4 as 10-4, don't turn it into 6)
+        expr = smart_parse(clean, evaluate=False)
+        
+        # If it's an equation x = 10-4, look at the Right Hand Side
+        if isinstance(expr, Eq):
+            rhs = expr.rhs
+        else:
+            rhs = expr
+            
+        # If the RHS is just a raw number (Integer, Float) or symbol (x), it's simplified.
+        if rhs.is_Number or rhs.is_Symbol:
+            return True
+            
+        # If it's a negative number like -6, SymPy sometimes treats it as Mul(-1, 6)
+        # We need to allow that.
+        if rhs.is_Mul and len(rhs.args) == 2 and rhs.args[0] == -1 and rhs.args[1].is_Number:
+            return True
+            
+        # Otherwise, it involves an operation (Add, Mul, Pow) -> Unsimplified
+        return False
+    except:
+        return True # Default to True if we can't tell, to avoid false alarms
+
+# --- DIAGNOSTIC BRAIN v3.1 ---
 def diagnose_error(set_correct, set_user):
     debug_log = []
     try:
@@ -110,16 +142,14 @@ def diagnose_error(set_correct, set_user):
             for x in set_correct:
                 val = extract_number(x)
                 if val is not None: c_vals.append(val)
-        except:
-            return "Logic error (Cannot read Set A)", "Iterate Fail A"
+        except: return "Logic error.", "Iterate Fail"
         
         u_vals = []
         try:
             for x in set_user:
                 val = extract_number(x)
                 if val is not None: u_vals.append(val)
-        except:
-             return "Logic error (Cannot read Set B)", "Iterate Fail B"
+        except: return "Logic error.", "Iterate Fail"
             
         debug_log.append(f"Extracted A: {c_vals}")
         debug_log.append(f"Extracted B: {u_vals}")
@@ -163,8 +193,15 @@ def validate_step(line_prev_str, line_curr_str):
         if set_A is None and line_prev_str: return False, "Could not solve Line A", "", debug_info
         if set_B is None: return False, "Could not parse Line B", "", debug_info
 
-        if set_A == set_B: return True, "Valid", "", debug_info
-        
+        # --- VALIDATION LOGIC ---
+        if set_A == set_B:
+            # NEW: Check if simplified!
+            is_simple = check_simplification(line_curr_str)
+            if is_simple:
+                return True, "Valid", "", debug_info
+            else:
+                return True, "Unsimplified", "Mathematically correct, but simplify your answer.", debug_info
+
         hint, internal_debug = diagnose_error(set_A, set_B)
         debug_info['Internal X-Ray'] = internal_debug
         
@@ -180,14 +217,11 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v3.2", page_icon="🧪")
+st.set_page_config(page_title="The Logic Lab v3.3", page_icon="🧪")
 st.title("🧪 The Logic Lab")
 
-# --- SIDEBAR & HIDDEN CONTROLS ---
 with st.sidebar:
     st.header("Settings")
-    
-    # HISTORY
     if st.session_state.history:
         st.write(f"Problems Checked: **{len(st.session_state.history)}**")
         df = pd.DataFrame(st.session_state.history)
@@ -196,9 +230,7 @@ with st.sidebar:
         if st.button("Clear History"):
             st.session_state.history = []
             st.rerun()
-            
     st.markdown("---")
-    # THE TOGGLE: Hidden by default!
     show_debug = st.checkbox("🛠️ Engineer Mode", value=False)
 
 col1, col2 = st.columns(2)
@@ -251,6 +283,10 @@ if st.button("Check Logic", type="primary"):
     if is_valid and status == "Valid":
         st.success("✅ **Perfect Logic!**")
         st.balloons()
+    elif is_valid and status == "Unsimplified":
+        # NEW STATE: YELLOW WARNING
+        st.warning("⚠️ **Correct, but not fully simplified.**")
+        st.info("💡 **Hint:** Perform the arithmetic (e.g., 10-4).")
     elif is_valid and status == "Partial":
         st.warning("⚠️ **Technically Correct, but Incomplete.**")
     else:
@@ -258,7 +294,6 @@ if st.button("Check Logic", type="primary"):
         if hint and hint != "Logic error.":
             st.info(f"💡 **Hint:** {hint}")
             
-    # ONLY SHOW DEBUGGER IF TOGGLE IS ON
     if not is_valid and show_debug:
         st.markdown("---")
         st.write("🛠️ **Debug X-Ray:**")
