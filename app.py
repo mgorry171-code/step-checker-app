@@ -88,76 +88,90 @@ def get_solution_set(text_str):
     except Exception as e:
         return None
 
-# --- IMPROVED DIAGNOSTIC BRAIN 🧠 ---
+# --- SIMPLIFIED DIAGNOSTIC BRAIN 🧠 ---
 def diagnose_error(set_correct, set_user):
     """
-    Bulletproof comparison logic.
+    Simplified logic to prevent crashes.
     """
     try:
-        # Safely convert SymPy sets to simple Python lists of floats
-        # This prevents crashes with complex numbers or weird formats
+        # 1. Check if we have simple numbers (FiniteSet). 
+        # If it's an inequality (Interval), we skip diagnostics for now to be safe.
+        if not isinstance(set_correct, sympy.FiniteSet) or not isinstance(set_user, sympy.FiniteSet):
+            return "Inequality logic mismatch."
+
+        # 2. Extract numbers safely using standard Python floats
         c_vals = []
-        for item in set_correct:
-            try: c_vals.append(float(sympy.re(N(item)))) # Force to Real Number
+        for x in set_correct:
+            try: c_vals.append(float(x)) 
             except: pass
-            
+        
         u_vals = []
-        for item in set_user:
-            try: u_vals.append(float(sympy.re(N(item))))
+        for x in set_user:
+            try: u_vals.append(float(x))
             except: pass
-
-        # If we couldn't extract numbers, we can't diagnose
+        
+        # If we failed to get numbers (e.g. empty), return generic
         if not c_vals or not u_vals: 
-            return "Values do not match."
+            return "Check your values."
 
-        # Compare the first answer found (Simplifying assumption for single-var algebra)
+        # 3. Compare just the first values found
         c = c_vals[0]
         u = u_vals[0]
-        
-        # Check 1: SIGN ERROR (e.g. 6 vs -6)
+
+        # Check: SIGN ERROR
         if abs(u) == abs(c) and u != c:
-            return "Check your signs (positive/negative)."
+            return "Check your signs (pos/neg)."
 
-        # Check 2: OFF BY ARITHMETIC (e.g. 10 vs 12)
+        # Check: ARITHMETIC (Off by a little bit)
         diff = u - c
-        # If difference is small (<= 10) and nearly an integer
-        if 0 < abs(diff) <= 10 and abs(diff - round(diff)) < 0.001:
-             return f"Close! You are off by {int(round(diff))}."
+        if 0 < abs(diff) <= 10:
+            # Check if it's an integer difference (like off by 2)
+            if abs(diff - round(diff)) < 0.001:
+                return f"Close! You are off by {int(round(diff))}."
+            else:
+                return f"Close! You are off by {round(diff, 2)}."
 
-        # Check 3: RECIPROCAL ERROR (e.g. 2 vs 0.5)
+        # Check: FRACTION FLIP
         if c != 0 and abs(u - (1/c)) < 0.001:
-             return "Did you flip the fraction?"
-             
-        return "Values do not match."
+            return "Did you flip the fraction?"
 
-    except Exception:
-        # Even if the diagnostic crashes, return a generic hint string
-        return "Check your math logic."
+        return "Logic error."
+
+    except Exception as e:
+        return f"Diagnostic Error: {e}"
+
 
 def validate_step(line_prev_str, line_curr_str):
+    # Variables for debugging
+    debug_info = {}
+    
     try:
-        if not line_prev_str or not line_curr_str: return False, "Empty", ""
+        if not line_prev_str or not line_curr_str: return False, "Empty", "", {}
         
         set_A = get_solution_set(line_prev_str)
         set_B = get_solution_set(line_curr_str)
         
-        if set_A is None and line_prev_str: return False, "Could not solve Line A", ""
-        if set_B is None: return False, "Could not parse Line B", ""
+        # Save for debug
+        debug_info['Set A'] = str(set_A)
+        debug_info['Set B'] = str(set_B)
+        
+        if set_A is None and line_prev_str: return False, "Could not solve Line A", "", debug_info
+        if set_B is None: return False, "Could not parse Line B", "", debug_info
 
-        if set_A == set_B: return True, "Valid", ""
-        if set_B.is_subset(set_A) and not set_B.is_empty: return True, "Partial", ""
+        if set_A == set_B: return True, "Valid", "", debug_info
+        if set_B.is_subset(set_A) and not set_B.is_empty: return True, "Partial", "", debug_info
         
         # If Invalid, RUN DIAGNOSTICS
         hint = diagnose_error(set_A, set_B)
-        return False, "Invalid", hint
+        return False, "Invalid", hint, debug_info
 
     except Exception as e:
-        return False, f"Syntax Error: {e}", ""
+        return False, f"Syntax Error: {e}", "", debug_info
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v2.6", page_icon="🧪")
-st.title("🧪 The Logic Lab (v2.6)")
+st.set_page_config(page_title="The Logic Lab v2.7", page_icon="🧪")
+st.title("🧪 The Logic Lab (v2.7)")
 
 with st.sidebar:
     st.header("📝 Session Log")
@@ -210,11 +224,14 @@ with st.expander("⌨️ Show Math Keypad", expanded=False):
 
 st.markdown("---")
 
+# Create a placeholder for the debug info so it's accessible
+debug_container = st.container()
+
 if st.button("Check Logic", type="primary"):
     line_a = st.session_state.line_prev
     line_b = st.session_state.line_curr
     
-    is_valid, status, hint = validate_step(line_a, line_b)
+    is_valid, status, hint, debug_data = validate_step(line_a, line_b)
     
     now = datetime.datetime.now().strftime("%H:%M:%S")
     st.session_state.history.append({
@@ -230,6 +247,13 @@ if st.button("Check Logic", type="primary"):
         st.error("❌ **Logic Break**")
         if hint:
             st.info(f"💡 **Hint:** {hint}")
+            
+    # --- DEBUGGER (Only shows if logic break) ---
+    if not is_valid:
+        with st.expander("🛠️ Developer Debugger (Open if Hint is missing)"):
+            st.write("If you see this, the app is working, but the math might be confusing it.")
+            st.write(f"**Computer saw Set A as:** `{debug_data.get('Set A')}`")
+            st.write(f"**Computer saw Set B as:** `{debug_data.get('Set B')}`")
 
 st.markdown("---")
 st.markdown(
