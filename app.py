@@ -8,13 +8,15 @@ import re
 
 # --- SETUP SESSION STATE ---
 if 'line_prev' not in st.session_state:
-    st.session_state.line_prev = "2x = 10" # Changed default to test division logic
+    st.session_state.line_prev = "x/2 = 30" # Changed default to test your division case
 if 'line_curr' not in st.session_state:
     st.session_state.line_curr = ""
 if 'history' not in st.session_state:
     st.session_state.history = []
 if 'keypad_target' not in st.session_state:
     st.session_state.keypad_target = "Current Line"
+if 'step_verified' not in st.session_state:
+    st.session_state.step_verified = False
 
 # --- HELPER FUNCTIONS ---
 def add_to_input(text_to_add):
@@ -104,8 +106,8 @@ def check_simplification(text):
     except:
         return True
 
-# --- DIAGNOSTIC BRAIN v3.4 (Pedagogical Update) ---
-def diagnose_error(set_correct, set_user):
+# --- DIAGNOSTIC BRAIN v3.5 ---
+def diagnose_error(set_correct, set_user, line_prev_text, line_curr_text):
     debug_log = []
     try:
         def extract_number(val):
@@ -140,27 +142,36 @@ def diagnose_error(set_correct, set_user):
         c = c_vals[0]
         u = u_vals[0]
 
-        # 1. SIGN ERROR (The Classic)
+        # 1. SIGN ERROR
         if abs(u) == abs(c) and u != c:
             return "Check your signs (pos/neg).", str(debug_log)
 
-        # 2. FRACTION FLIP (Reciprocal)
+        # 2. FRACTION FLIP
         if c != 0 and abs(u - (1/c)) < 0.001:
             return "Did you flip the fraction?", str(debug_log)
 
-        # 3. FAKE MULTIPLICATION (The Square Rule)
-        # If u/c is a perfect square (4, 9, 16, 25...), they likely multiplied instead of divided.
-        if c != 0:
-            ratio = u / c
-            # Check if ratio is roughly an integer (e.g. 4.0)
-            if abs(ratio - round(ratio)) < 0.001:
-                r_int = int(round(ratio))
-                # Check if it's a significant square (2^2, 3^2, 4^2...)
-                if r_int in [4, 9, 16, 25, 36, 49, 100]:
+        # 3. FAKE MULTIPLICATION / DIVISION CHECK
+        if c != 0 and u != 0:
+            # Case A: They Multiplied instead of Divided (Ratio is Square)
+            ratio_m = u / c
+            if abs(ratio_m - round(ratio_m)) < 0.001:
+                r_int = int(round(ratio_m))
+                if r_int in [4, 9, 16, 25, 36, 100]:
                      return "Did you multiply instead of divide?", str(debug_log)
 
-        # 4. ARITHMETIC SLIP (Pedagogical Fix)
-        # Instead of "Off by 3", we just say "Check your arithmetic"
+            # Case B: They Divided instead of Multiplied (Inverse Ratio is Square)
+            ratio_d = c / u
+            if abs(ratio_d - round(ratio_d)) < 0.001:
+                r_int = int(round(ratio_d))
+                if r_int in [4, 9, 16, 25, 36, 100]:
+                     return "Did you divide instead of multiply?", str(debug_log)
+
+        # 4. DISTRIBUTION ERROR (Text Heuristic + Arithmetic)
+        # If prev had parens, curr doesn't, and answer is wrong...
+        if "(" in line_prev_text and "(" not in line_curr_text:
+             return "Check your distribution. Did you multiply every term?", str(debug_log)
+
+        # 5. ARITHMETIC SLIP
         diff = u - c
         if 0 < abs(diff) <= 10:
              return "Check your arithmetic. You are close!", str(debug_log)
@@ -170,6 +181,10 @@ def diagnose_error(set_correct, set_user):
     except Exception as e:
         return f"Diagnostic Error: {e}", str(debug_log)
 
+def next_step():
+    st.session_state.line_prev = st.session_state.line_curr
+    st.session_state.line_curr = ""
+    st.session_state.step_verified = False
 
 def validate_step(line_prev_str, line_curr_str):
     debug_info = {}
@@ -192,10 +207,11 @@ def validate_step(line_prev_str, line_curr_str):
             else:
                 return True, "Unsimplified", "Mathematically correct, but simplify your answer.", debug_info
 
-        hint, internal_debug = diagnose_error(set_A, set_B)
+        # Pass text strings for distribution checking
+        hint, internal_debug = diagnose_error(set_A, set_B, line_prev_str, line_curr_str)
         debug_info['Internal X-Ray'] = internal_debug
         
-        if "Check your" in hint or "Close!" in hint or "flip" in hint or "multiply" in hint:
+        if "Check your" in hint or "Close!" in hint or "flip" in hint or "multiply" in hint or "divide" in hint or "distribution" in hint:
              pass
         elif set_B.is_subset(set_A) and not set_B.is_empty: 
              return True, "Partial", "", debug_info
@@ -207,7 +223,7 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v3.4", page_icon="🧪")
+st.set_page_config(page_title="The Logic Lab v3.5", page_icon="🧪")
 st.title("🧪 The Logic Lab")
 
 with st.sidebar:
@@ -223,6 +239,7 @@ with st.sidebar:
     st.markdown("---")
     show_debug = st.checkbox("🛠️ Engineer Mode", value=False)
 
+# --- DISPLAY AREA ---
 col1, col2 = st.columns(2)
 with col1:
     st.markdown("### Previous Line")
@@ -236,6 +253,7 @@ with col2:
 
 st.markdown("---")
 
+# --- KEYPAD ---
 with st.expander("⌨️ Show Math Keypad", expanded=False):
     st.write("Click a button to add it to the **" + st.session_state.keypad_target + "**.")
     st.radio("Target:", ["Previous Line", "Current Line"], horizontal=True, key="keypad_target", label_visibility="collapsed")
@@ -259,36 +277,48 @@ with st.expander("⌨️ Show Math Keypad", expanded=False):
 
 st.markdown("---")
 
-if st.button("Check Logic", type="primary"):
-    line_a = st.session_state.line_prev
-    line_b = st.session_state.line_curr
-    
-    is_valid, status, hint, debug_data = validate_step(line_a, line_b)
-    
-    now = datetime.datetime.now().strftime("%H:%M:%S")
-    st.session_state.history.append({
-        "Time": now, "Input A": line_a, "Input B": line_b, "Result": status, "Hint": hint
-    })
-    
-    if is_valid and status == "Valid":
-        st.success("✅ **Perfect Logic!**")
-        st.balloons()
-    elif is_valid and status == "Unsimplified":
-        st.warning("⚠️ **Correct, but not fully simplified.**")
-        st.info("💡 **Hint:** Perform the arithmetic (e.g., 10-4).")
-    elif is_valid and status == "Partial":
-        st.warning("⚠️ **Technically Correct, but Incomplete.**")
-    else:
-        st.error("❌ **Logic Break**")
-        if hint and hint != "Logic error.":
-            st.info(f"💡 **Hint:** {hint}")
-            
-    if not is_valid and show_debug:
-        st.markdown("---")
-        st.write("🛠️ **Debug X-Ray:**")
-        st.write(f"**Raw Set A:** `{debug_data.get('Raw Set A')}`")
-        st.write(f"**Raw Set B:** `{debug_data.get('Raw Set B')}`")
-        st.code(debug_data.get('Internal X-Ray'))
+# --- CHECK LOGIC & NEXT STEP ---
+c_check, c_next = st.columns([1, 1])
+
+with c_check:
+    if st.button("Check Logic", type="primary"):
+        line_a = st.session_state.line_prev
+        line_b = st.session_state.line_curr
+        
+        is_valid, status, hint, debug_data = validate_step(line_a, line_b)
+        
+        now = datetime.datetime.now().strftime("%H:%M:%S")
+        st.session_state.history.append({
+            "Time": now, "Input A": line_a, "Input B": line_b, "Result": status, "Hint": hint
+        })
+        
+        if is_valid:
+            st.session_state.step_verified = True # Enable Next Step Button
+            if status == "Valid":
+                st.success("✅ **Perfect Logic!**")
+                st.balloons()
+            elif status == "Unsimplified":
+                st.warning("⚠️ **Correct, but not fully simplified.**")
+                st.info("💡 **Hint:** Perform the arithmetic.")
+            elif status == "Partial":
+                st.warning("⚠️ **Technically Correct, but Incomplete.**")
+        else:
+            st.session_state.step_verified = False
+            st.error("❌ **Logic Break**")
+            if hint and hint != "Logic error.":
+                st.info(f"💡 **Hint:** {hint}")
+                
+        if not is_valid and show_debug:
+            st.markdown("---")
+            st.write("🛠️ **Debug X-Ray:**")
+            st.write(f"**Raw Set A:** `{debug_data.get('Raw Set A')}`")
+            st.write(f"**Raw Set B:** `{debug_data.get('Raw Set B')}`")
+            st.code(debug_data.get('Internal X-Ray'))
+
+with c_next:
+    # Only show this button if the previous check was Valid
+    if st.session_state.step_verified:
+        st.button("⬇️ Next Step (Move Down)", on_click=next_step)
 
 st.markdown("---")
 st.markdown(
