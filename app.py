@@ -5,10 +5,11 @@ from sympy.parsing.sympy_parser import parse_expr, standard_transformations, imp
 import datetime
 import pandas as pd
 import re
+import matplotlib.pyplot as plt # Ready for graphing later!
 
 # --- SETUP SESSION STATE ---
 if 'line_prev' not in st.session_state:
-    st.session_state.line_prev = "x/2 = 30" # Changed default to test your division case
+    st.session_state.line_prev = "2x + 3y = 20; x + y = 8" # Default System Example
 if 'line_curr' not in st.session_state:
     st.session_state.line_curr = ""
 if 'history' not in st.session_state:
@@ -27,9 +28,8 @@ def add_to_input(text_to_add):
 
 def clean_input(text):
     text = text.lower()
-    text = re.sub(r'(\d),(\d{3})', r'\1\2', text)
-    text = re.sub(r'(\d),(\d{3})', r'\1\2', text)
-    text = text.replace(" and ", ",")
+    text = re.sub(r'(\d),(\d{3})', r'\1\2', text) # Thousands
+    text = text.replace(" and ", ";") # Treat 'and' as separator
     text = text.replace("^", "**")
     text = text.replace("+/-", "±")
     text = text.replace("%", "/100")
@@ -40,10 +40,14 @@ def clean_input(text):
 def smart_parse(text, evaluate=True):
     transformations = (standard_transformations + (implicit_multiplication_application,))
     try:
+        # Handle Inequalities
         if "<=" in text or ">=" in text or "<" in text or ">" in text:
             return parse_expr(text, transformations=transformations, evaluate=evaluate)
+        
+        # Handle Equations
         elif "=" in text:
             parts = text.split("=")
+            # Handle multiple equals? No, split only first for single eq
             lhs = parse_expr(parts[0], transformations=transformations, evaluate=evaluate)
             rhs = parse_expr(parts[1], transformations=transformations, evaluate=evaluate)
             return Eq(lhs, rhs)
@@ -56,6 +60,12 @@ def pretty_print(math_str):
     try:
         clean_str = clean_input(math_str)
         clean_str = clean_str.replace("±", "±")
+        # Visual cleanup for systems (replace ; with , for display)
+        if ";" in clean_str:
+             parts = clean_str.split(";")
+             latex_parts = [latex(smart_parse(p, evaluate=False)) for p in parts if p.strip()]
+             return ", \\quad ".join(latex_parts)
+        
         expr = smart_parse(clean_str, evaluate=False)
         return latex(expr)
     except:
@@ -64,33 +74,66 @@ def pretty_print(math_str):
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
+# --- LOGIC BRAIN 4.0 (Multi-Variable) ---
 def get_solution_set(text_str):
-    x = symbols('x')
+    # DEFINE X AND Y
+    x, y = symbols('x y')
     clean = clean_input(text_str)
+    
     try:
-        if "±" in clean:
-            parts = clean.split("±")
-            val = smart_parse(parts[1].strip(), evaluate=True)
-            return sympy.FiniteSet(val, -val)
-        elif "," in clean:
-            rhs = clean.split("=")[1] if "=" in clean else clean
-            items = rhs.split(",")
-            vals = []
-            for i in items:
-                if i.strip(): vals.append(smart_parse(i.strip(), evaluate=True))
-            return sympy.FiniteSet(*vals)
+        # 1. DETECT SYSTEM (Split by semicolon or comma if multiple equals exist)
+        # We prefer semicolon ';' for systems to avoid confusion with coordinates (4,4)
+        # But we try to be smart about commas.
+        
+        equations = []
+        if ";" in clean:
+            raw_eqs = clean.split(";")
+            for r in raw_eqs:
+                if r.strip(): equations.append(smart_parse(r, evaluate=True))
+        elif clean.count("=") > 1 and "," in clean:
+             # Heuristic: "x=4, y=4" -> Two equations
+            raw_eqs = clean.split(",")
+            for r in raw_eqs:
+                if r.strip(): equations.append(smart_parse(r, evaluate=True))
         else:
-            expr = smart_parse(clean, evaluate=True)
-            if not isinstance(expr, Eq) and not expr.is_Relational:
-                 if 'x' not in str(expr):
-                     return sympy.FiniteSet(expr)
+             # Single item
+             equations.append(smart_parse(clean, evaluate=True))
+
+        # 2. SOLVE SYSTEM or SINGLE EQUATION
+        if len(equations) > 1:
+            # It's a system!
+            sol = solve(equations, (x, y), set=True)
+            # sol returns (list_of_symbols, set_of_tuples)
+            # e.g. ([x, y], {(4, 4)})
+            return sol[1] # Return the Set of Solutions
+        else:
+            # Single expression/equation
+            expr = equations[0]
+            
+            # Case: Coordinate Point (4, 4) -> Interpreted by SymPy as Tuple
+            if isinstance(expr, tuple):
+                # Convert tuple (4, 4) to FiniteSet((4,4))
+                return sympy.FiniteSet(expr)
+
+            # Case: Equation x=4
             if isinstance(expr, Eq) or not (expr.is_Relational):
-                if not isinstance(expr, Eq): pass 
-                sol = sympy.solve(expr, x, set=True)
-                return sol[1] 
+                 # Check if it has y
+                 if 'y' in str(expr):
+                     # Line with 2 vars (e.g. y = 2x + 1) -> infinite solutions?
+                     # For checking steps, we treat it as a relationship.
+                     # solve returns expression for y in terms of x?
+                     # Let's just return the equation object itself for now if it's 2-var
+                     return sympy.FiniteSet(expr)
+                 else:
+                     # Single var x
+                     if 'x' not in str(expr) and 'y' not in str(expr):
+                         return sympy.FiniteSet(expr) # Just a number
+                     sol = solve(expr, x, set=True)
+                     return sol[1] 
             else:
                 solution = reduce_inequalities(expr, x)
                 return solution.as_set()
+
     except Exception as e:
         return None
 
@@ -106,80 +149,11 @@ def check_simplification(text):
     except:
         return True
 
-# --- DIAGNOSTIC BRAIN v3.5 ---
-def diagnose_error(set_correct, set_user, line_prev_text, line_curr_text):
-    debug_log = []
-    try:
-        def extract_number(val):
-            try: return float(val)
-            except: pass
-            try: return float(val[0])
-            except: pass
-            try: return float(val.args[0])
-            except: pass
-            return None
-
-        c_vals = []
-        try:
-            for x in set_correct:
-                val = extract_number(x)
-                if val is not None: c_vals.append(val)
-        except: return "Logic error.", "Iterate Fail A"
-        
-        u_vals = []
-        try:
-            for x in set_user:
-                val = extract_number(x)
-                if val is not None: u_vals.append(val)
-        except: return "Logic error.", "Iterate Fail B"
-            
-        debug_log.append(f"Extracted A: {c_vals}")
-        debug_log.append(f"Extracted B: {u_vals}")
-        
-        if not c_vals or not u_vals: 
-            return "Check your values.", str(debug_log)
-
-        c = c_vals[0]
-        u = u_vals[0]
-
-        # 1. SIGN ERROR
-        if abs(u) == abs(c) and u != c:
-            return "Check your signs (pos/neg).", str(debug_log)
-
-        # 2. FRACTION FLIP
-        if c != 0 and abs(u - (1/c)) < 0.001:
-            return "Did you flip the fraction?", str(debug_log)
-
-        # 3. FAKE MULTIPLICATION / DIVISION CHECK
-        if c != 0 and u != 0:
-            # Case A: They Multiplied instead of Divided (Ratio is Square)
-            ratio_m = u / c
-            if abs(ratio_m - round(ratio_m)) < 0.001:
-                r_int = int(round(ratio_m))
-                if r_int in [4, 9, 16, 25, 36, 100]:
-                     return "Did you multiply instead of divide?", str(debug_log)
-
-            # Case B: They Divided instead of Multiplied (Inverse Ratio is Square)
-            ratio_d = c / u
-            if abs(ratio_d - round(ratio_d)) < 0.001:
-                r_int = int(round(ratio_d))
-                if r_int in [4, 9, 16, 25, 36, 100]:
-                     return "Did you divide instead of multiply?", str(debug_log)
-
-        # 4. DISTRIBUTION ERROR (Text Heuristic + Arithmetic)
-        # If prev had parens, curr doesn't, and answer is wrong...
-        if "(" in line_prev_text and "(" not in line_curr_text:
-             return "Check your distribution. Did you multiply every term?", str(debug_log)
-
-        # 5. ARITHMETIC SLIP
-        diff = u - c
-        if 0 < abs(diff) <= 10:
-             return "Check your arithmetic. You are close!", str(debug_log)
-
-        return "Logic error.", str(debug_log)
-
-    except Exception as e:
-        return f"Diagnostic Error: {e}", str(debug_log)
+def diagnose_error(set_correct, set_user):
+    # Simplified diagnostics for Systems (v4.0)
+    # We basically just check if they match for now.
+    # We can add sophisticated Multi-Var diagnostics later.
+    return "Check your math logic.", ""
 
 def next_step():
     st.session_state.line_prev = st.session_state.line_curr
@@ -200,22 +174,18 @@ def validate_step(line_prev_str, line_curr_str):
         if set_A is None and line_prev_str: return False, "Could not solve Line A", "", debug_info
         if set_B is None: return False, "Could not parse Line B", "", debug_info
 
+        # --- VALIDATION LOGIC ---
+        # Direct Match
         if set_A == set_B:
-            is_simple = check_simplification(line_curr_str)
-            if is_simple:
-                return True, "Valid", "", debug_info
-            else:
-                return True, "Unsimplified", "Mathematically correct, but simplify your answer.", debug_info
+            return True, "Valid", "", debug_info
+        
+        # Coordinate Match Logic: {(4, 4)} vs {(4, 4)}
+        # Sometimes user types "x=4, y=4" which solves to {(4,4)}
+        # Sometimes user types "(4,4)" which parses to {(4,4)}
+        # They should match automatically via set comparison.
 
-        # Pass text strings for distribution checking
-        hint, internal_debug = diagnose_error(set_A, set_B, line_prev_str, line_curr_str)
-        debug_info['Internal X-Ray'] = internal_debug
-        
-        if "Check your" in hint or "Close!" in hint or "flip" in hint or "multiply" in hint or "divide" in hint or "distribution" in hint:
-             pass
-        elif set_B.is_subset(set_A) and not set_B.is_empty: 
-             return True, "Partial", "", debug_info
-        
+        # If mismatch, run diagnostics (Generic for now in v4)
+        hint, internal_debug = diagnose_error(set_A, set_B)
         return False, "Invalid", hint, debug_info
 
     except Exception as e:
@@ -223,7 +193,7 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v3.5", page_icon="🧪")
+st.set_page_config(page_title="The Logic Lab v4.0", page_icon="🧪")
 st.title("🧪 The Logic Lab")
 
 with st.sidebar:
@@ -245,6 +215,7 @@ with col1:
     st.markdown("### Previous Line")
     st.text_input("Line A", key="line_prev", label_visibility="collapsed")
     if st.session_state.line_prev: st.latex(pretty_print(st.session_state.line_prev))
+    st.caption("For Systems: Use ';' to separate equations. (e.g. `2x+y=10; x-y=4`)")
 
 with col2:
     st.markdown("### Current Line")
@@ -264,7 +235,7 @@ with st.expander("⌨️ Show Math Keypad", expanded=False):
     c2.button("|x|", on_click=add_to_input, args=("abs(",))
     c3.button("(", on_click=add_to_input, args=("(",))
     c4.button(")", on_click=add_to_input, args=(")",))
-    c5.button("±", on_click=add_to_input, args=("+/-",))
+    c5.button(";", on_click=add_to_input, args=("; ",)) # NEW BUTTON for Systems
     c6.button("÷", on_click=add_to_input, args=("/",))
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -272,8 +243,8 @@ with st.expander("⌨️ Show Math Keypad", expanded=False):
     c2.button("\>", on_click=add_to_input, args=(">",)) 
     c3.button(" ≤ ", on_click=add_to_input, args=("<=",))
     c4.button(" ≥ ", on_click=add_to_input, args=(">=",))
-    c5.markdown("") 
-    c6.markdown("")
+    c5.button("x", on_click=add_to_input, args=("x",))
+    c6.button("y", on_click=add_to_input, args=("y",)) # NEW BUTTON for Y
 
 st.markdown("---")
 
@@ -313,10 +284,8 @@ with c_check:
             st.write("🛠️ **Debug X-Ray:**")
             st.write(f"**Raw Set A:** `{debug_data.get('Raw Set A')}`")
             st.write(f"**Raw Set B:** `{debug_data.get('Raw Set B')}`")
-            st.code(debug_data.get('Internal X-Ray'))
 
 with c_next:
-    # Only show this button if the previous check was Valid
     if st.session_state.step_verified:
         st.button("⬇️ Next Step (Move Down)", on_click=next_step)
 
