@@ -5,11 +5,10 @@ from sympy.parsing.sympy_parser import parse_expr, standard_transformations, imp
 import datetime
 import pandas as pd
 import re
-import matplotlib.pyplot as plt # Ready for graphing later!
 
 # --- SETUP SESSION STATE ---
 if 'line_prev' not in st.session_state:
-    st.session_state.line_prev = "2x + 3y = 20; x + y = 8" # Default System Example
+    st.session_state.line_prev = "2x + 3y = 20; x + y = 8" 
 if 'line_curr' not in st.session_state:
     st.session_state.line_curr = ""
 if 'history' not in st.session_state:
@@ -47,7 +46,6 @@ def smart_parse(text, evaluate=True):
         # Handle Equations
         elif "=" in text:
             parts = text.split("=")
-            # Handle multiple equals? No, split only first for single eq
             lhs = parse_expr(parts[0], transformations=transformations, evaluate=evaluate)
             rhs = parse_expr(parts[1], transformations=transformations, evaluate=evaluate)
             return Eq(lhs, rhs)
@@ -74,7 +72,7 @@ def pretty_print(math_str):
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
-# --- LOGIC BRAIN 4.0 (Multi-Variable) ---
+# --- LOGIC BRAIN 4.1 (Multi-Variable) ---
 def get_solution_set(text_str):
     # DEFINE X AND Y
     x, y = symbols('x y')
@@ -82,16 +80,12 @@ def get_solution_set(text_str):
     
     try:
         # 1. DETECT SYSTEM (Split by semicolon or comma if multiple equals exist)
-        # We prefer semicolon ';' for systems to avoid confusion with coordinates (4,4)
-        # But we try to be smart about commas.
-        
         equations = []
         if ";" in clean:
             raw_eqs = clean.split(";")
             for r in raw_eqs:
                 if r.strip(): equations.append(smart_parse(r, evaluate=True))
         elif clean.count("=") > 1 and "," in clean:
-             # Heuristic: "x=4, y=4" -> Two equations
             raw_eqs = clean.split(",")
             for r in raw_eqs:
                 if r.strip(): equations.append(smart_parse(r, evaluate=True))
@@ -103,31 +97,23 @@ def get_solution_set(text_str):
         if len(equations) > 1:
             # It's a system!
             sol = solve(equations, (x, y), set=True)
-            # sol returns (list_of_symbols, set_of_tuples)
-            # e.g. ([x, y], {(4, 4)})
-            return sol[1] # Return the Set of Solutions
+            return sol[1] 
         else:
             # Single expression/equation
             expr = equations[0]
             
-            # Case: Coordinate Point (4, 4) -> Interpreted by SymPy as Tuple
+            # Case: Coordinate Point (4, 4)
             if isinstance(expr, tuple):
-                # Convert tuple (4, 4) to FiniteSet((4,4))
                 return sympy.FiniteSet(expr)
 
-            # Case: Equation x=4
+            # Case: Equation
             if isinstance(expr, Eq) or not (expr.is_Relational):
-                 # Check if it has y
+                 # If it contains y, treat as relation (infinite set for now)
                  if 'y' in str(expr):
-                     # Line with 2 vars (e.g. y = 2x + 1) -> infinite solutions?
-                     # For checking steps, we treat it as a relationship.
-                     # solve returns expression for y in terms of x?
-                     # Let's just return the equation object itself for now if it's 2-var
                      return sympy.FiniteSet(expr)
                  else:
-                     # Single var x
                      if 'x' not in str(expr) and 'y' not in str(expr):
-                         return sympy.FiniteSet(expr) # Just a number
+                         return sympy.FiniteSet(expr)
                      sol = solve(expr, x, set=True)
                      return sol[1] 
             else:
@@ -150,9 +136,6 @@ def check_simplification(text):
         return True
 
 def diagnose_error(set_correct, set_user):
-    # Simplified diagnostics for Systems (v4.0)
-    # We basically just check if they match for now.
-    # We can add sophisticated Multi-Var diagnostics later.
     return "Check your math logic.", ""
 
 def next_step():
@@ -175,16 +158,9 @@ def validate_step(line_prev_str, line_curr_str):
         if set_B is None: return False, "Could not parse Line B", "", debug_info
 
         # --- VALIDATION LOGIC ---
-        # Direct Match
         if set_A == set_B:
             return True, "Valid", "", debug_info
         
-        # Coordinate Match Logic: {(4, 4)} vs {(4, 4)}
-        # Sometimes user types "x=4, y=4" which solves to {(4,4)}
-        # Sometimes user types "(4,4)" which parses to {(4,4)}
-        # They should match automatically via set comparison.
-
-        # If mismatch, run diagnostics (Generic for now in v4)
         hint, internal_debug = diagnose_error(set_A, set_B)
         return False, "Invalid", hint, debug_info
 
@@ -193,7 +169,7 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v4.0", page_icon="🧪")
+st.set_page_config(page_title="The Logic Lab v4.1", page_icon="🧪")
 st.title("🧪 The Logic Lab")
 
 with st.sidebar:
@@ -235,7 +211,7 @@ with st.expander("⌨️ Show Math Keypad", expanded=False):
     c2.button("|x|", on_click=add_to_input, args=("abs(",))
     c3.button("(", on_click=add_to_input, args=("(",))
     c4.button(")", on_click=add_to_input, args=(")",))
-    c5.button(";", on_click=add_to_input, args=("; ",)) # NEW BUTTON for Systems
+    c5.button(";", on_click=add_to_input, args=("; ",))
     c6.button("÷", on_click=add_to_input, args=("/",))
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -244,7 +220,7 @@ with st.expander("⌨️ Show Math Keypad", expanded=False):
     c3.button(" ≤ ", on_click=add_to_input, args=("<=",))
     c4.button(" ≥ ", on_click=add_to_input, args=(">=",))
     c5.button("x", on_click=add_to_input, args=("x",))
-    c6.button("y", on_click=add_to_input, args=("y",)) # NEW BUTTON for Y
+    c6.button("y", on_click=add_to_input, args=("y",))
 
 st.markdown("---")
 
@@ -264,7 +240,7 @@ with c_check:
         })
         
         if is_valid:
-            st.session_state.step_verified = True # Enable Next Step Button
+            st.session_state.step_verified = True 
             if status == "Valid":
                 st.success("✅ **Perfect Logic!**")
                 st.balloons()
