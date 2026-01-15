@@ -1,10 +1,12 @@
 import streamlit as st
 import sympy
-from sympy import symbols, sympify, solve, Eq, latex, N, reduce_inequalities
+from sympy import symbols, solve, Eq, latex, simplify
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application
 import datetime
 import pandas as pd
 import re
+import matplotlib.pyplot as plt
+import numpy as np
 
 # --- SETUP SESSION STATE ---
 if 'line_prev' not in st.session_state:
@@ -27,8 +29,8 @@ def add_to_input(text_to_add):
 
 def clean_input(text):
     text = text.lower()
-    text = re.sub(r'(\d),(\d{3})', r'\1\2', text) # Thousands
-    text = text.replace(" and ", ";") # Treat 'and' as separator
+    text = re.sub(r'(\d),(\d{3})', r'\1\2', text)
+    text = text.replace(" and ", ";")
     text = text.replace("^", "**")
     text = text.replace("+/-", "±")
     text = text.replace("%", "/100")
@@ -39,11 +41,8 @@ def clean_input(text):
 def smart_parse(text, evaluate=True):
     transformations = (standard_transformations + (implicit_multiplication_application,))
     try:
-        # Handle Inequalities
         if "<=" in text or ">=" in text or "<" in text or ">" in text:
             return parse_expr(text, transformations=transformations, evaluate=evaluate)
-        
-        # Handle Equations
         elif "=" in text:
             parts = text.split("=")
             lhs = parse_expr(parts[0], transformations=transformations, evaluate=evaluate)
@@ -58,12 +57,10 @@ def pretty_print(math_str):
     try:
         clean_str = clean_input(math_str)
         clean_str = clean_str.replace("±", "±")
-        # Visual cleanup for systems (replace ; with , for display)
         if ";" in clean_str:
              parts = clean_str.split(";")
              latex_parts = [latex(smart_parse(p, evaluate=False)) for p in parts if p.strip()]
              return ", \\quad ".join(latex_parts)
-        
         expr = smart_parse(clean_str, evaluate=False)
         return latex(expr)
     except:
@@ -72,14 +69,11 @@ def pretty_print(math_str):
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
-# --- LOGIC BRAIN 4.1 (Multi-Variable) ---
+# --- LOGIC BRAIN 4.1 ---
 def get_solution_set(text_str):
-    # DEFINE X AND Y
     x, y = symbols('x y')
     clean = clean_input(text_str)
-    
     try:
-        # 1. DETECT SYSTEM (Split by semicolon or comma if multiple equals exist)
         equations = []
         if ";" in clean:
             raw_eqs = clean.split(";")
@@ -90,36 +84,23 @@ def get_solution_set(text_str):
             for r in raw_eqs:
                 if r.strip(): equations.append(smart_parse(r, evaluate=True))
         else:
-             # Single item
              equations.append(smart_parse(clean, evaluate=True))
 
-        # 2. SOLVE SYSTEM or SINGLE EQUATION
         if len(equations) > 1:
-            # It's a system!
             sol = solve(equations, (x, y), set=True)
             return sol[1] 
         else:
-            # Single expression/equation
             expr = equations[0]
-            
-            # Case: Coordinate Point (4, 4)
-            if isinstance(expr, tuple):
-                return sympy.FiniteSet(expr)
-
-            # Case: Equation
+            if isinstance(expr, tuple): return sympy.FiniteSet(expr)
             if isinstance(expr, Eq) or not (expr.is_Relational):
-                 # If it contains y, treat as relation (infinite set for now)
-                 if 'y' in str(expr):
-                     return sympy.FiniteSet(expr)
+                 if 'y' in str(expr): return sympy.FiniteSet(expr)
                  else:
-                     if 'x' not in str(expr) and 'y' not in str(expr):
-                         return sympy.FiniteSet(expr)
+                     if 'x' not in str(expr) and 'y' not in str(expr): return sympy.FiniteSet(expr)
                      sol = solve(expr, x, set=True)
                      return sol[1] 
             else:
                 solution = reduce_inequalities(expr, x)
                 return solution.as_set()
-
     except Exception as e:
         return None
 
@@ -143,11 +124,85 @@ def next_step():
     st.session_state.line_curr = ""
     st.session_state.step_verified = False
 
+# --- NEW: GRAPHING ENGINE 📉 ---
+def plot_system(text_str):
+    """
+    Parses Line A, solves for Y, and plots the lines using Matplotlib.
+    """
+    try:
+        x, y = symbols('x y')
+        clean = clean_input(text_str)
+        
+        equations = []
+        if ";" in clean:
+            raw_eqs = clean.split(";")
+            for r in raw_eqs:
+                if r.strip(): equations.append(smart_parse(r, evaluate=True))
+        else:
+            # Try splitting by comma if strict system syntax isn't used
+            if clean.count("=") > 1 and "," in clean:
+                 raw_eqs = clean.split(",")
+                 for r in raw_eqs:
+                    if r.strip(): equations.append(smart_parse(r, evaluate=True))
+            else:
+                 equations.append(smart_parse(clean, evaluate=True))
+        
+        # Create Plot
+        fig, ax = plt.subplots(figsize=(6, 4))
+        x_vals = np.linspace(-10, 10, 400)
+        
+        colors = ['blue', 'orange', 'green']
+        i = 0
+        
+        has_plotted = False
+        
+        for eq in equations:
+            # We need to solve for y:  2x + 3y = 20  ->  3y = 20 - 2x  -> y = (20-2x)/3
+            try:
+                # Check if equation has y
+                if 'y' in str(eq):
+                    y_expr = solve(eq, y) # Returns a list, e.g. [20/3 - 2*x/3]
+                    if y_expr:
+                        # Convert sympy expression to a python function for plotting
+                        f_y = sympy.lambdify(x, y_expr[0], "numpy")
+                        y_vals = f_y(x_vals)
+                        
+                        # Plot
+                        ax.plot(x_vals, y_vals, label=f"${latex(eq)}$", color=colors[i % len(colors)])
+                        has_plotted = True
+                        i += 1
+                elif 'x' in str(eq):
+                    # Vertical line x = c
+                    x_sol = solve(eq, x)
+                    if x_sol:
+                        val = float(x_sol[0])
+                        ax.axvline(x=val, label=f"${latex(eq)}$", color=colors[i % len(colors)], linestyle='--')
+                        has_plotted = True
+                        i += 1
+            except:
+                pass
+        
+        if not has_plotted:
+            return None
+
+        # Style the graph
+        ax.spines['left'].set_position('center')
+        ax.spines['bottom'].set_position('center')
+        ax.spines['right'].set_color('none')
+        ax.spines['top'].set_color('none')
+        ax.grid(True, which='both', linestyle='--', linewidth=0.5)
+        ax.legend()
+        ax.set_xlim(-10, 10)
+        ax.set_ylim(-10, 10)
+        
+        return fig
+    except Exception as e:
+        return None
+
 def validate_step(line_prev_str, line_curr_str):
     debug_info = {}
     try:
         if not line_prev_str or not line_curr_str: return False, "Empty", "", {}
-        
         set_A = get_solution_set(line_prev_str)
         set_B = get_solution_set(line_curr_str)
         
@@ -157,7 +212,6 @@ def validate_step(line_prev_str, line_curr_str):
         if set_A is None and line_prev_str: return False, "Could not solve Line A", "", debug_info
         if set_B is None: return False, "Could not parse Line B", "", debug_info
 
-        # --- VALIDATION LOGIC ---
         if set_A == set_B:
             return True, "Valid", "", debug_info
         
@@ -169,7 +223,7 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v4.1", page_icon="🧪")
+st.set_page_config(page_title="The Logic Lab v4.2", page_icon="🧪")
 st.title("🧪 The Logic Lab")
 
 with st.sidebar:
@@ -190,8 +244,17 @@ col1, col2 = st.columns(2)
 with col1:
     st.markdown("### Previous Line")
     st.text_input("Line A", key="line_prev", label_visibility="collapsed")
-    if st.session_state.line_prev: st.latex(pretty_print(st.session_state.line_prev))
-    st.caption("For Systems: Use ';' to separate equations. (e.g. `2x+y=10; x-y=4`)")
+    if st.session_state.line_prev: 
+        st.latex(pretty_print(st.session_state.line_prev))
+        # GRAPH TOGGLE
+        if st.checkbox("📈 Visualize Graph"):
+            fig = plot_system(st.session_state.line_prev)
+            if fig:
+                st.pyplot(fig)
+            else:
+                st.caption("Could not graph this expression.")
+
+    st.caption("For Systems: Use ';' to separate. (e.g. `2x+y=10; x-y=4`)")
 
 with col2:
     st.markdown("### Current Line")
