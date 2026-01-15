@@ -5,8 +5,8 @@ from sympy.parsing.sympy_parser import parse_expr, standard_transformations, imp
 import datetime
 import pandas as pd
 import re
-import matplotlib.pyplot as plt
 import numpy as np
+import plotly.graph_objects as go # The Interactive Graphing Tool
 
 # --- SETUP SESSION STATE ---
 if 'line_prev' not in st.session_state:
@@ -69,7 +69,7 @@ def pretty_print(math_str):
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
-# --- LOGIC BRAIN 4.1 ---
+# --- LOGIC BRAIN 4.3 ---
 def get_solution_set(text_str):
     x, y = symbols('x y')
     clean = clean_input(text_str)
@@ -124,10 +124,10 @@ def next_step():
     st.session_state.line_curr = ""
     st.session_state.step_verified = False
 
-# --- NEW: GRAPHING ENGINE 📉 ---
-def plot_system(text_str):
+# --- NEW: INTERACTIVE PLOTLY ENGINE 📉 ---
+def plot_system_interactive(text_str):
     """
-    Parses Line A, solves for Y, and plots the lines using Matplotlib.
+    Creates an interactive Plotly chart with hover info and a data table.
     """
     try:
         x, y = symbols('x y')
@@ -139,7 +139,6 @@ def plot_system(text_str):
             for r in raw_eqs:
                 if r.strip(): equations.append(smart_parse(r, evaluate=True))
         else:
-            # Try splitting by comma if strict system syntax isn't used
             if clean.count("=") > 1 and "," in clean:
                  raw_eqs = clean.split(",")
                  for r in raw_eqs:
@@ -147,57 +146,91 @@ def plot_system(text_str):
             else:
                  equations.append(smart_parse(clean, evaluate=True))
         
-        # Create Plot
-        fig, ax = plt.subplots(figsize=(6, 4))
-        x_vals = np.linspace(-10, 10, 400)
+        # Create Plotly Figure
+        fig = go.Figure()
+        
+        # Domain for plotting
+        x_vals = np.linspace(-10, 10, 100)
         
         colors = ['blue', 'orange', 'green']
         i = 0
+        point_data = [] # Store points for the table
         
         has_plotted = False
         
         for eq in equations:
-            # We need to solve for y:  2x + 3y = 20  ->  3y = 20 - 2x  -> y = (20-2x)/3
             try:
-                # Check if equation has y
+                # SOLVE FOR Y
                 if 'y' in str(eq):
-                    y_expr = solve(eq, y) # Returns a list, e.g. [20/3 - 2*x/3]
+                    y_expr = solve(eq, y)
                     if y_expr:
-                        # Convert sympy expression to a python function for plotting
+                        # Create Python function
                         f_y = sympy.lambdify(x, y_expr[0], "numpy")
                         y_vals = f_y(x_vals)
                         
-                        # Plot
-                        ax.plot(x_vals, y_vals, label=f"${latex(eq)}$", color=colors[i % len(colors)])
+                        # Add Line Trace
+                        label = f"${latex(eq)}$"
+                        fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='lines', name=f"Eq {i+1}", line=dict(color=colors[i % 3])))
+                        
+                        # Calculate a few nice integer points for the table (The "Guide")
+                        table_points = []
+                        for val in [-2, 0, 2, 4]:
+                            try:
+                                res_y = float(y_expr[0].subs(x, val))
+                                table_points.append(f"({val}, {round(res_y, 2)})")
+                            except: pass
+                        
+                        point_data.append({"Equation": f"Eq {i+1}", "Points to Plot": ", ".join(table_points)})
+
                         has_plotted = True
                         i += 1
+                        
+                # SOLVE FOR X (Vertical Line)
                 elif 'x' in str(eq):
-                    # Vertical line x = c
                     x_sol = solve(eq, x)
                     if x_sol:
                         val = float(x_sol[0])
-                        ax.axvline(x=val, label=f"${latex(eq)}$", color=colors[i % len(colors)], linestyle='--')
+                        fig.add_vline(x=val, line_dash="dash", line_color=colors[i%3], annotation_text=f"x={val}")
                         has_plotted = True
                         i += 1
-            except:
-                pass
-        
-        if not has_plotted:
-            return None
 
-        # Style the graph
-        ax.spines['left'].set_position('center')
-        ax.spines['bottom'].set_position('center')
-        ax.spines['right'].set_color('none')
-        ax.spines['top'].set_color('none')
-        ax.grid(True, which='both', linestyle='--', linewidth=0.5)
-        ax.legend()
-        ax.set_xlim(-10, 10)
-        ax.set_ylim(-10, 10)
+            except: pass
         
-        return fig
+        # Add Intersection Point Highlight if it's a system
+        if len(equations) > 1:
+            try:
+                sol = solve(equations, (x, y))
+                if sol and isinstance(sol, dict):
+                    # Single intersection
+                    sx = float(sol[x])
+                    sy = float(sol[y])
+                    fig.add_trace(go.Scatter(
+                        x=[sx], y=[sy], 
+                        mode='markers+text', 
+                        marker=dict(size=12, color='red'),
+                        text=[f"Intersection ({round(sx,1)}, {round(sy,1)})"],
+                        textposition="top center",
+                        name="Solution"
+                    ))
+            except: pass
+
+        if not has_plotted: return None, None
+
+        # Layout styling
+        fig.update_layout(
+            title="Interactive Graph (Zoom & Hover)",
+            xaxis_title="X Axis",
+            yaxis_title="Y Axis",
+            xaxis=dict(range=[-10, 10], showgrid=True, zeroline=True, zerolinewidth=2, zerolinecolor='black'),
+            yaxis=dict(range=[-10, 10], showgrid=True, zeroline=True, zerolinewidth=2, zerolinecolor='black'),
+            height=500,
+            showlegend=True
+        )
+        
+        return fig, point_data
+
     except Exception as e:
-        return None
+        return None, None
 
 def validate_step(line_prev_str, line_curr_str):
     debug_info = {}
@@ -223,7 +256,7 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v4.2", page_icon="🧪")
+st.set_page_config(page_title="The Logic Lab v4.3", page_icon="🧪")
 st.title("🧪 The Logic Lab")
 
 with st.sidebar:
@@ -246,11 +279,19 @@ with col1:
     st.text_input("Line A", key="line_prev", label_visibility="collapsed")
     if st.session_state.line_prev: 
         st.latex(pretty_print(st.session_state.line_prev))
-        # GRAPH TOGGLE
+        
+        # GRAPH SECTION (TABS)
         if st.checkbox("📈 Visualize Graph"):
-            fig = plot_system(st.session_state.line_prev)
+            fig, data_points = plot_system_interactive(st.session_state.line_prev)
             if fig:
-                st.pyplot(fig)
+                tab1, tab2 = st.tabs(["📉 Interactive Graph", "🔢 Table of Points"])
+                with tab1:
+                    st.plotly_chart(fig, use_container_width=True)
+                    st.caption("Hover over lines to see coordinates. Scroll to zoom.")
+                with tab2:
+                    st.write("**Guide Points:** Use these points to help plot the lines.")
+                    if data_points:
+                        st.table(pd.DataFrame(data_points))
             else:
                 st.caption("Could not graph this expression.")
 
