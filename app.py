@@ -69,7 +69,7 @@ def pretty_print(math_str):
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
-# --- LOGIC BRAIN 4.3 ---
+# --- LOGIC BRAIN 4.5 ---
 def get_solution_set(text_str):
     x, y = symbols('x y')
     clean = clean_input(text_str)
@@ -124,7 +124,6 @@ def next_step():
     st.session_state.line_curr = ""
     st.session_state.step_verified = False
 
-# --- INTERACTIVE PLOTLY ENGINE (Updated with T-Charts) 📉 ---
 def plot_system_interactive(text_str):
     try:
         x, y = symbols('x y')
@@ -147,67 +146,40 @@ def plot_system_interactive(text_str):
         x_vals = np.linspace(-10, 10, 100)
         colors = ['blue', 'orange', 'green']
         i = 0
-        
-        # New structure: List of Dictionaries containing DataFrames
         table_data_list = [] 
-        
         has_plotted = False
         
         for eq in equations:
             try:
-                # SOLVE FOR Y
                 if 'y' in str(eq):
                     y_expr = solve(eq, y)
                     if y_expr:
                         f_y = sympy.lambdify(x, y_expr[0], "numpy")
                         y_vals = f_y(x_vals)
-                        
-                        # Add Line to Graph
                         fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='lines', name=f"Eq {i+1}", line=dict(color=colors[i % 3])))
-                        
-                        # GENERATE T-CHART DATA (x and y columns)
                         t_x = []
                         t_y = []
-                        # Choose smart points: -4, -2, 0, 2, 4
                         for val in [-4, -2, 0, 2, 4]:
                             try:
                                 res_y = float(y_expr[0].subs(x, val))
                                 t_x.append(val)
                                 t_y.append(round(res_y, 2))
                             except: pass
-                        
-                        # Create DataFrame
                         df_table = pd.DataFrame({"x": t_x, "y": t_y})
-                        
-                        # Store it with a label
-                        table_data_list.append({
-                            "label": f"Equation {i+1}: ${latex(eq)}$",
-                            "df": df_table
-                        })
-
+                        table_data_list.append({"label": f"Equation {i+1}: ${latex(eq)}$", "df": df_table})
                         has_plotted = True
                         i += 1
-                        
-                # SOLVE FOR X (Vertical)
                 elif 'x' in str(eq):
                     x_sol = solve(eq, x)
                     if x_sol:
                         val = float(x_sol[0])
                         fig.add_vline(x=val, line_dash="dash", line_color=colors[i%3], annotation_text=f"x={val}")
-                        
-                        # T-Chart for Vertical Line
-                        t_x = [val, val, val, val, val]
+                        t_x = [val]*5
                         t_y = [-4, -2, 0, 2, 4]
                         df_table = pd.DataFrame({"x": t_x, "y": t_y})
-                        
-                        table_data_list.append({
-                            "label": f"Equation {i+1}: ${latex(eq)}$",
-                            "df": df_table
-                        })
-                        
+                        table_data_list.append({"label": f"Equation {i+1}: ${latex(eq)}$", "df": df_table})
                         has_plotted = True
                         i += 1
-
             except: pass
         
         if len(equations) > 1:
@@ -216,28 +188,12 @@ def plot_system_interactive(text_str):
                 if sol and isinstance(sol, dict):
                     sx = float(sol[x])
                     sy = float(sol[y])
-                    fig.add_trace(go.Scatter(
-                        x=[sx], y=[sy], 
-                        mode='markers+text', 
-                        marker=dict(size=12, color='red'),
-                        text=[f"Solution ({round(sx,1)}, {round(sy,1)})"],
-                        textposition="top center",
-                        name="Intersection"
-                    ))
+                    fig.add_trace(go.Scatter(x=[sx], y=[sy], mode='markers+text', marker=dict(size=12, color='red'), text=[f"Intersection ({round(sx,1)}, {round(sy,1)})"], textposition="top center", name="Intersection"))
             except: pass
 
         if not has_plotted: return None, None
 
-        fig.update_layout(
-            xaxis_title="X Axis",
-            yaxis_title="Y Axis",
-            xaxis=dict(range=[-10, 10], showgrid=True, zeroline=True, zerolinewidth=2, zerolinecolor='black'),
-            yaxis=dict(range=[-10, 10], showgrid=True, zeroline=True, zerolinewidth=2, zerolinecolor='black'),
-            height=500,
-            showlegend=True,
-            margin=dict(l=20, r=20, t=30, b=20)
-        )
-        
+        fig.update_layout(xaxis_title="X Axis", yaxis_title="Y Axis", xaxis=dict(range=[-10, 10], showgrid=True, zeroline=True, zerolinewidth=2, zerolinecolor='black'), yaxis=dict(range=[-10, 10], showgrid=True, zeroline=True, zerolinewidth=2, zerolinecolor='black'), height=500, showlegend=True, margin=dict(l=20, r=20, t=30, b=20))
         return fig, table_data_list
 
     except Exception as e:
@@ -249,15 +205,13 @@ def validate_step(line_prev_str, line_curr_str):
         if not line_prev_str or not line_curr_str: return False, "Empty", "", {}
         set_A = get_solution_set(line_prev_str)
         set_B = get_solution_set(line_curr_str)
-        
         debug_info['Raw Set A'] = str(set_A)
         debug_info['Raw Set B'] = str(set_B)
         
         if set_A is None and line_prev_str: return False, "Could not solve Line A", "", debug_info
         if set_B is None: return False, "Could not parse Line B", "", debug_info
 
-        if set_A == set_B:
-            return True, "Valid", "", debug_info
+        if set_A == set_B: return True, "Valid", "", debug_info
         
         hint, internal_debug = diagnose_error(set_A, set_B)
         return False, "Invalid", hint, debug_info
@@ -267,7 +221,7 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v4.4", page_icon="🧪")
+st.set_page_config(page_title="The Logic Lab v4.5", page_icon="🧪")
 st.title("🧪 The Logic Lab")
 
 with st.sidebar:
@@ -280,6 +234,11 @@ with st.sidebar:
         if st.button("Clear History"):
             st.session_state.history = []
             st.rerun()
+            
+    st.markdown("---")
+    # PARENT MODE TOGGLE
+    parent_mode = st.toggle("👨‍👩‍👧 Parent Mode", value=False)
+    
     st.markdown("---")
     show_debug = st.checkbox("🛠️ Engineer Mode", value=False)
 
@@ -291,6 +250,12 @@ with col1:
     if st.session_state.line_prev: 
         st.latex(pretty_print(st.session_state.line_prev))
         
+        # PARENT MODE: REVEAL ANSWER
+        if parent_mode:
+            if st.button("👁️ Reveal Answer for Line A"):
+                sol_set = get_solution_set(st.session_state.line_prev)
+                st.success(f"**Answer Key:** {latex(sol_set)}")
+        
         if st.checkbox("📈 Visualize Graph"):
             fig, table_list = plot_system_interactive(st.session_state.line_prev)
             if fig:
@@ -301,7 +266,6 @@ with col1:
                 with tab2:
                     st.write("Use these T-Charts to plot the lines:")
                     if table_list:
-                        # Display tables side-by-side if there are 2 equations
                         if len(table_list) == 2:
                             t1, t2 = st.columns(2)
                             with t1:
