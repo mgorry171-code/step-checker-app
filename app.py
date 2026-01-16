@@ -6,7 +6,7 @@ import datetime
 import pandas as pd
 import re
 import numpy as np
-import plotly.graph_objects as go # The Interactive Graphing Tool
+import plotly.graph_objects as go
 
 # --- SETUP SESSION STATE ---
 if 'line_prev' not in st.session_state:
@@ -124,11 +124,8 @@ def next_step():
     st.session_state.line_curr = ""
     st.session_state.step_verified = False
 
-# --- NEW: INTERACTIVE PLOTLY ENGINE 📉 ---
+# --- INTERACTIVE PLOTLY ENGINE (Updated with T-Charts) 📉 ---
 def plot_system_interactive(text_str):
-    """
-    Creates an interactive Plotly chart with hover info and a data table.
-    """
     try:
         x, y = symbols('x y')
         clean = clean_input(text_str)
@@ -146,15 +143,13 @@ def plot_system_interactive(text_str):
             else:
                  equations.append(smart_parse(clean, evaluate=True))
         
-        # Create Plotly Figure
         fig = go.Figure()
-        
-        # Domain for plotting
         x_vals = np.linspace(-10, 10, 100)
-        
         colors = ['blue', 'orange', 'green']
         i = 0
-        point_data = [] # Store points for the table
+        
+        # New structure: List of Dictionaries containing DataFrames
+        table_data_list = [] 
         
         has_plotted = False
         
@@ -164,70 +159,86 @@ def plot_system_interactive(text_str):
                 if 'y' in str(eq):
                     y_expr = solve(eq, y)
                     if y_expr:
-                        # Create Python function
                         f_y = sympy.lambdify(x, y_expr[0], "numpy")
                         y_vals = f_y(x_vals)
                         
-                        # Add Line Trace
-                        label = f"${latex(eq)}$"
+                        # Add Line to Graph
                         fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='lines', name=f"Eq {i+1}", line=dict(color=colors[i % 3])))
                         
-                        # Calculate a few nice integer points for the table (The "Guide")
-                        table_points = []
-                        for val in [-2, 0, 2, 4]:
+                        # GENERATE T-CHART DATA (x and y columns)
+                        t_x = []
+                        t_y = []
+                        # Choose smart points: -4, -2, 0, 2, 4
+                        for val in [-4, -2, 0, 2, 4]:
                             try:
                                 res_y = float(y_expr[0].subs(x, val))
-                                table_points.append(f"({val}, {round(res_y, 2)})")
+                                t_x.append(val)
+                                t_y.append(round(res_y, 2))
                             except: pass
                         
-                        point_data.append({"Equation": f"Eq {i+1}", "Points to Plot": ", ".join(table_points)})
+                        # Create DataFrame
+                        df_table = pd.DataFrame({"x": t_x, "y": t_y})
+                        
+                        # Store it with a label
+                        table_data_list.append({
+                            "label": f"Equation {i+1}: ${latex(eq)}$",
+                            "df": df_table
+                        })
 
                         has_plotted = True
                         i += 1
                         
-                # SOLVE FOR X (Vertical Line)
+                # SOLVE FOR X (Vertical)
                 elif 'x' in str(eq):
                     x_sol = solve(eq, x)
                     if x_sol:
                         val = float(x_sol[0])
                         fig.add_vline(x=val, line_dash="dash", line_color=colors[i%3], annotation_text=f"x={val}")
+                        
+                        # T-Chart for Vertical Line
+                        t_x = [val, val, val, val, val]
+                        t_y = [-4, -2, 0, 2, 4]
+                        df_table = pd.DataFrame({"x": t_x, "y": t_y})
+                        
+                        table_data_list.append({
+                            "label": f"Equation {i+1}: ${latex(eq)}$",
+                            "df": df_table
+                        })
+                        
                         has_plotted = True
                         i += 1
 
             except: pass
         
-        # Add Intersection Point Highlight if it's a system
         if len(equations) > 1:
             try:
                 sol = solve(equations, (x, y))
                 if sol and isinstance(sol, dict):
-                    # Single intersection
                     sx = float(sol[x])
                     sy = float(sol[y])
                     fig.add_trace(go.Scatter(
                         x=[sx], y=[sy], 
                         mode='markers+text', 
                         marker=dict(size=12, color='red'),
-                        text=[f"Intersection ({round(sx,1)}, {round(sy,1)})"],
+                        text=[f"Solution ({round(sx,1)}, {round(sy,1)})"],
                         textposition="top center",
-                        name="Solution"
+                        name="Intersection"
                     ))
             except: pass
 
         if not has_plotted: return None, None
 
-        # Layout styling
         fig.update_layout(
-            title="Interactive Graph (Zoom & Hover)",
             xaxis_title="X Axis",
             yaxis_title="Y Axis",
             xaxis=dict(range=[-10, 10], showgrid=True, zeroline=True, zerolinewidth=2, zerolinecolor='black'),
             yaxis=dict(range=[-10, 10], showgrid=True, zeroline=True, zerolinewidth=2, zerolinecolor='black'),
             height=500,
-            showlegend=True
+            showlegend=True,
+            margin=dict(l=20, r=20, t=30, b=20)
         )
         
-        return fig, point_data
+        return fig, table_data_list
 
     except Exception as e:
         return None, None
@@ -256,7 +267,7 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v4.3", page_icon="🧪")
+st.set_page_config(page_title="The Logic Lab v4.4", page_icon="🧪")
 st.title("🧪 The Logic Lab")
 
 with st.sidebar:
@@ -280,18 +291,29 @@ with col1:
     if st.session_state.line_prev: 
         st.latex(pretty_print(st.session_state.line_prev))
         
-        # GRAPH SECTION (TABS)
         if st.checkbox("📈 Visualize Graph"):
-            fig, data_points = plot_system_interactive(st.session_state.line_prev)
+            fig, table_list = plot_system_interactive(st.session_state.line_prev)
             if fig:
-                tab1, tab2 = st.tabs(["📉 Interactive Graph", "🔢 Table of Points"])
+                tab1, tab2 = st.tabs(["📉 Interactive Graph", "🔢 Table of Values"])
                 with tab1:
                     st.plotly_chart(fig, use_container_width=True)
-                    st.caption("Hover over lines to see coordinates. Scroll to zoom.")
+                    st.caption("Hover to see points.")
                 with tab2:
-                    st.write("**Guide Points:** Use these points to help plot the lines.")
-                    if data_points:
-                        st.table(pd.DataFrame(data_points))
+                    st.write("Use these T-Charts to plot the lines:")
+                    if table_list:
+                        # Display tables side-by-side if there are 2 equations
+                        if len(table_list) == 2:
+                            t1, t2 = st.columns(2)
+                            with t1:
+                                st.write(table_list[0]["label"])
+                                st.dataframe(table_list[0]["df"], hide_index=True)
+                            with t2:
+                                st.write(table_list[1]["label"])
+                                st.dataframe(table_list[1]["df"], hide_index=True)
+                        else:
+                            for item in table_list:
+                                st.write(item["label"])
+                                st.dataframe(item["df"], hide_index=True)
             else:
                 st.caption("Could not graph this expression.")
 
