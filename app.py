@@ -221,7 +221,7 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v4.6", page_icon="🧪")
+st.set_page_config(page_title="The Logic Lab v4.7", page_icon="🧪")
 st.title("🧪 The Logic Lab")
 
 with st.sidebar:
@@ -255,8 +255,9 @@ with col1:
             if st.button("👁️ Reveal Answer for Line A"):
                 sol_set = get_solution_set(st.session_state.line_prev)
                 if sol_set:
-                     # THE FIX: Wrap in $ so Streamlit knows it is math!
-                    st.success(f"**Answer Key:** $ {latex(sol_set)} $")
+                     # THE FIX: Use st.latex directly instead of f-string
+                    st.success("**Answer Key:**")
+                    st.latex(latex(sol_set))
                 else:
                     st.error("Could not solve this expression.")
         
@@ -322,45 +323,4 @@ st.markdown("---")
 c_check, c_next = st.columns([1, 1])
 
 with c_check:
-    if st.button("Check Logic", type="primary"):
-        line_a = st.session_state.line_prev
-        line_b = st.session_state.line_curr
-        
-        is_valid, status, hint, debug_data = validate_step(line_a, line_b)
-        
-        now = datetime.datetime.now().strftime("%H:%M:%S")
-        st.session_state.history.append({
-            "Time": now, "Input A": line_a, "Input B": line_b, "Result": status, "Hint": hint
-        })
-        
-        if is_valid:
-            st.session_state.step_verified = True 
-            if status == "Valid":
-                st.success("✅ **Perfect Logic!**")
-                st.balloons()
-            elif status == "Unsimplified":
-                st.warning("⚠️ **Correct, but not fully simplified.**")
-                st.info("💡 **Hint:** Perform the arithmetic.")
-            elif status == "Partial":
-                st.warning("⚠️ **Technically Correct, but Incomplete.**")
-        else:
-            st.session_state.step_verified = False
-            st.error("❌ **Logic Break**")
-            if hint and hint != "Logic error.":
-                st.info(f"💡 **Hint:** {hint}")
-                
-        if not is_valid and show_debug:
-            st.markdown("---")
-            st.write("🛠️ **Debug X-Ray:**")
-            st.write(f"**Raw Set A:** `{debug_data.get('Raw Set A')}`")
-            st.write(f"**Raw Set B:** `{debug_data.get('Raw Set B')}`")
-
-with c_next:
-    if st.session_state.step_verified:
-        st.button("⬇️ Next Step (Move Down)", on_click=next_step)
-
-st.markdown("---")
-st.markdown(
-    """<div style='text-align: center; color: #666;'><small>Built by The Logic Lab 🧪 | © 2026 Step-Checker</small></div>""",
-    unsafe_allow_html=True
-)
+    if st.
