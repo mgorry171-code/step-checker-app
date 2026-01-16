@@ -221,7 +221,7 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v4.5", page_icon="🧪")
+st.set_page_config(page_title="The Logic Lab v4.6", page_icon="🧪")
 st.title("🧪 The Logic Lab")
 
 with st.sidebar:
@@ -254,7 +254,11 @@ with col1:
         if parent_mode:
             if st.button("👁️ Reveal Answer for Line A"):
                 sol_set = get_solution_set(st.session_state.line_prev)
-                st.success(f"**Answer Key:** {latex(sol_set)}")
+                if sol_set:
+                     # THE FIX: Wrap in $ so Streamlit knows it is math!
+                    st.success(f"**Answer Key:** $ {latex(sol_set)} $")
+                else:
+                    st.error("Could not solve this expression.")
         
         if st.checkbox("📈 Visualize Graph"):
             fig, table_list = plot_system_interactive(st.session_state.line_prev)
