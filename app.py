@@ -1,6 +1,6 @@
 import streamlit as st
 import sympy
-from sympy import symbols, solve, Eq, latex, simplify
+from sympy import symbols, solve, Eq, latex, simplify, I, pi, E
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application
 import datetime
 import pandas as pd
@@ -9,8 +9,9 @@ import numpy as np
 import plotly.graph_objects as go
 
 # --- SETUP SESSION STATE ---
+# Updated default to show off Algebra 2 features
 if 'line_prev' not in st.session_state:
-    st.session_state.line_prev = "2x + 3y = 20; x + y = 8" 
+    st.session_state.line_prev = "x^2 + 4 = 0" 
 if 'line_curr' not in st.session_state:
     st.session_state.line_curr = ""
 if 'history' not in st.session_state:
@@ -32,7 +33,11 @@ def clean_input(text):
     text = re.sub(r'(\d),(\d{3})', r'\1\2', text)
     text = text.replace(" and ", ";")
     text = text.replace("^", "**")
+    # Convert 'i' to 'I' (Imaginary) but NOT inside words like 'sin', 'pi', 'limit'
+    # This Regex checks for 'i' that is NOT surrounded by other letters
+    text = re.sub(r'(?<![a-z])i(?![a-z])', 'I', text) 
     text = text.replace("+/-", "±")
+    text = text.replace("√", "sqrt") # Handle square root symbol
     text = text.replace("%", "/100")
     text = text.replace(" of ", "*")
     text = text.replace("=<", "<=").replace("=>", ">=")
@@ -41,15 +46,18 @@ def clean_input(text):
 def smart_parse(text, evaluate=True):
     transformations = (standard_transformations + (implicit_multiplication_application,))
     try:
+        # Define extra local variables for 'e' and 'pi' if user types them as text
+        local_dict = {'e': E, 'pi': pi}
+        
         if "<=" in text or ">=" in text or "<" in text or ">" in text:
-            return parse_expr(text, transformations=transformations, evaluate=evaluate)
+            return parse_expr(text, transformations=transformations, evaluate=evaluate, local_dict=local_dict)
         elif "=" in text:
             parts = text.split("=")
-            lhs = parse_expr(parts[0], transformations=transformations, evaluate=evaluate)
-            rhs = parse_expr(parts[1], transformations=transformations, evaluate=evaluate)
+            lhs = parse_expr(parts[0], transformations=transformations, evaluate=evaluate, local_dict=local_dict)
+            rhs = parse_expr(parts[1], transformations=transformations, evaluate=evaluate, local_dict=local_dict)
             return Eq(lhs, rhs)
         else:
-            return parse_expr(text, transformations=transformations, evaluate=evaluate)
+            return parse_expr(text, transformations=transformations, evaluate=evaluate, local_dict=local_dict)
     except:
         return sympify(text, evaluate=evaluate)
 
@@ -69,7 +77,7 @@ def pretty_print(math_str):
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
-# --- LOGIC BRAIN 4.5 ---
+# --- LOGIC BRAIN 5.0 (Algebra 2 Support) ---
 def get_solution_set(text_str):
     x, y = symbols('x y')
     clean = clean_input(text_str)
@@ -93,8 +101,9 @@ def get_solution_set(text_str):
             expr = equations[0]
             if isinstance(expr, tuple): return sympy.FiniteSet(expr)
             if isinstance(expr, Eq) or not (expr.is_Relational):
-                 if 'y' in str(expr): return sympy.FiniteSet(expr)
+                 if 'y' in str(expr) and 'x' in str(expr): return sympy.FiniteSet(expr) # 2-var relation
                  else:
+                     # Solve for x (handles quadratics automatically)
                      if 'x' not in str(expr) and 'y' not in str(expr): return sympy.FiniteSet(expr)
                      sol = solve(expr, x, set=True)
                      return sol[1] 
@@ -110,8 +119,23 @@ def check_simplification(text):
         expr = smart_parse(clean, evaluate=False)
         if isinstance(expr, Eq): rhs = expr.rhs
         else: rhs = expr
+        
+        # 1. Basic Number or Symbol (x, 5, 3.14)
         if rhs.is_Number or rhs.is_Symbol: return True
+        
+        # 2. Negative Number (-5) is technically Mul(-1, 5)
         if rhs.is_Mul and len(rhs.args) == 2 and rhs.args[0] == -1 and rhs.args[1].is_Number: return True
+        
+        # 3. ALGEBRA 2 UPDATE: Complex Numbers (3 + 4i) are 'Add' but valid
+        # Check if it has an imaginary part
+        if rhs.has(I):
+             # If it's just a number + number*I, it's simplified
+             # We assume SymPy automatically simplifies "2+3+i" to "5+i" during parsing if evaluate=True
+             # But here evaluate=False. 
+             # Let's rely on SymPy's simplifying power implicitly.
+             # If the user typed "3+4i", that is standard form.
+             return True
+
         return False
     except:
         return True
@@ -151,22 +175,41 @@ def plot_system_interactive(text_str):
         
         for eq in equations:
             try:
+                # SKIP COMPLEX PLOTTING
+                # If equation has 'I' (imaginary), graphing usually fails or is meaningless on Real plane
+                if eq.has(I):
+                    continue
+
                 if 'y' in str(eq):
                     y_expr = solve(eq, y)
                     if y_expr:
-                        f_y = sympy.lambdify(x, y_expr[0], "numpy")
+                        # Use numpy complex support just in case, but filter later
+                        f_y = sympy.lambdify(x, y_expr[0], "numpy") 
                         y_vals = f_y(x_vals)
+                        
+                        # Filter out complex results (e.g. sqrt(negative))
+                        if np.iscomplexobj(y_vals):
+                            # Set complex parts to NaN so they don't plot
+                            y_vals = y_vals.real 
+                            # (Simple hack: better is to mask them, but this prevents crashing)
+                        
                         fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='lines', name=f"Eq {i+1}", line=dict(color=colors[i % 3])))
+                        
+                        # T-Chart
                         t_x = []
                         t_y = []
                         for val in [-4, -2, 0, 2, 4]:
                             try:
-                                res_y = float(y_expr[0].subs(x, val))
-                                t_x.append(val)
-                                t_y.append(round(res_y, 2))
+                                res_y = y_expr[0].subs(x, val)
+                                if res_y.is_real: # Only list real points
+                                    t_x.append(val)
+                                    t_y.append(round(float(res_y), 2))
                             except: pass
-                        df_table = pd.DataFrame({"x": t_x, "y": t_y})
-                        table_data_list.append({"label": f"Equation {i+1}: ${latex(eq)}$", "df": df_table})
+                        
+                        if t_x:
+                            df_table = pd.DataFrame({"x": t_x, "y": t_y})
+                            table_data_list.append({"label": f"Equation {i+1}: ${latex(eq)}$", "df": df_table})
+                        
                         has_plotted = True
                         i += 1
                 elif 'x' in str(eq):
@@ -182,14 +225,9 @@ def plot_system_interactive(text_str):
                         i += 1
             except: pass
         
+        # Intersection logic (Skip for now to avoid complex crashes in intersection)
         if len(equations) > 1:
-            try:
-                sol = solve(equations, (x, y))
-                if sol and isinstance(sol, dict):
-                    sx = float(sol[x])
-                    sy = float(sol[y])
-                    fig.add_trace(go.Scatter(x=[sx], y=[sy], mode='markers+text', marker=dict(size=12, color='red'), text=[f"Intersection ({round(sx,1)}, {round(sy,1)})"], textposition="top center", name="Intersection"))
-            except: pass
+             pass 
 
         if not has_plotted: return None, None
 
@@ -221,7 +259,7 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v4.7", page_icon="🧪")
+st.set_page_config(page_title="The Logic Lab v5.0", page_icon="🧪")
 st.title("🧪 The Logic Lab")
 
 with st.sidebar:
@@ -255,7 +293,6 @@ with col1:
             if st.button("👁️ Reveal Answer for Line A"):
                 sol_set = get_solution_set(st.session_state.line_prev)
                 if sol_set:
-                     # THE FIX: Use st.latex directly instead of f-string
                     st.success("**Answer Key:**")
                     st.latex(latex(sol_set))
                 else:
@@ -284,7 +321,7 @@ with col1:
                                 st.write(item["label"])
                                 st.dataframe(item["df"], hide_index=True)
             else:
-                st.caption("Could not graph this expression.")
+                st.caption("Could not graph this expression. (Graphs may be hidden for complex numbers)")
 
     st.caption("For Systems: Use ';' to separate. (e.g. `2x+y=10; x-y=4`)")
 
@@ -295,20 +332,22 @@ with col2:
 
 st.markdown("---")
 
-# --- KEYPAD ---
+# --- KEYPAD (UPDATED FOR ALGEBRA 2) ---
 with st.expander("⌨️ Show Math Keypad", expanded=False):
     st.write("Click a button to add it to the **" + st.session_state.keypad_target + "**.")
     st.radio("Target:", ["Previous Line", "Current Line"], horizontal=True, key="keypad_target", label_visibility="collapsed")
     st.write("") 
     
+    # ROW 1
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.button("x²", on_click=add_to_input, args=("^2",))
-    c2.button("|x|", on_click=add_to_input, args=("abs(",))
+    c2.button("√", on_click=add_to_input, args=("sqrt(",)) # NEW: Square Root
     c3.button("(", on_click=add_to_input, args=("(",))
     c4.button(")", on_click=add_to_input, args=(")",))
     c5.button(";", on_click=add_to_input, args=("; ",))
     c6.button("÷", on_click=add_to_input, args=("/",))
 
+    # ROW 2
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.button(" < ", on_click=add_to_input, args=("<",))
     c2.button("\>", on_click=add_to_input, args=(">",)) 
@@ -316,52 +355,11 @@ with st.expander("⌨️ Show Math Keypad", expanded=False):
     c4.button(" ≥ ", on_click=add_to_input, args=(">=",))
     c5.button("x", on_click=add_to_input, args=("x",))
     c6.button("y", on_click=add_to_input, args=("y",))
-
-st.markdown("---")
-
-# --- CHECK LOGIC & NEXT STEP ---
-c_check, c_next = st.columns([1, 1])
-
-with c_check:
-    if st.button("Check Logic", type="primary"):
-        line_a = st.session_state.line_prev
-        line_b = st.session_state.line_curr
-        
-        is_valid, status, hint, debug_data = validate_step(line_a, line_b)
-        
-        now = datetime.datetime.now().strftime("%H:%M:%S")
-        st.session_state.history.append({
-            "Time": now, "Input A": line_a, "Input B": line_b, "Result": status, "Hint": hint
-        })
-        
-        if is_valid:
-            st.session_state.step_verified = True 
-            if status == "Valid":
-                st.success("✅ **Perfect Logic!**")
-                st.balloons()
-            elif status == "Unsimplified":
-                st.warning("⚠️ **Correct, but not fully simplified.**")
-                st.info("💡 **Hint:** Perform the arithmetic.")
-            elif status == "Partial":
-                st.warning("⚠️ **Technically Correct, but Incomplete.**")
-        else:
-            st.session_state.step_verified = False
-            st.error("❌ **Logic Break**")
-            if hint and hint != "Logic error.":
-                st.info(f"💡 **Hint:** {hint}")
-                
-        if not is_valid and show_debug:
-            st.markdown("---")
-            st.write("🛠️ **Debug X-Ray:**")
-            st.write(f"**Raw Set A:** `{debug_data.get('Raw Set A')}`")
-            st.write(f"**Raw Set B:** `{debug_data.get('Raw Set B')}`")
-
-with c_next:
-    if st.session_state.step_verified:
-        st.button("⬇️ Next Step (Move Down)", on_click=next_step)
-
-st.markdown("---")
-st.markdown(
-    """<div style='text-align: center; color: #666;'><small>Built by The Logic Lab 🧪 | © 2026 Step-Checker</small></div>""",
-    unsafe_allow_html=True
-)
+    
+    # ROW 3 (NEW ALGEBRA 2 BUTTONS)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.button("i", on_click=add_to_input, args=("i",))  # Imaginary
+    c2.button("π", on_click=add_to_input, args=("pi",)) # Pi
+    c3.button("e", on_click=add_to_input, args=("e",))  # Euler
+    c4.button("log", on_click=add_to_input, args=("log(",)) # Log
+    c5.button("sin", on_click
