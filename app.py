@@ -9,7 +9,6 @@ import numpy as np
 import plotly.graph_objects as go
 
 # --- SETUP SESSION STATE ---
-# Updated default to show off Algebra 2 features
 if 'line_prev' not in st.session_state:
     st.session_state.line_prev = "x^2 + 4 = 0" 
 if 'line_curr' not in st.session_state:
@@ -34,7 +33,6 @@ def clean_input(text):
     text = text.replace(" and ", ";")
     text = text.replace("^", "**")
     # Convert 'i' to 'I' (Imaginary) but NOT inside words like 'sin', 'pi', 'limit'
-    # This Regex checks for 'i' that is NOT surrounded by other letters
     text = re.sub(r'(?<![a-z])i(?![a-z])', 'I', text) 
     text = text.replace("+/-", "±")
     text = text.replace("√", "sqrt") # Handle square root symbol
@@ -127,13 +125,7 @@ def check_simplification(text):
         if rhs.is_Mul and len(rhs.args) == 2 and rhs.args[0] == -1 and rhs.args[1].is_Number: return True
         
         # 3. ALGEBRA 2 UPDATE: Complex Numbers (3 + 4i) are 'Add' but valid
-        # Check if it has an imaginary part
         if rhs.has(I):
-             # If it's just a number + number*I, it's simplified
-             # We assume SymPy automatically simplifies "2+3+i" to "5+i" during parsing if evaluate=True
-             # But here evaluate=False. 
-             # Let's rely on SymPy's simplifying power implicitly.
-             # If the user typed "3+4i", that is standard form.
              return True
 
         return False
@@ -176,32 +168,26 @@ def plot_system_interactive(text_str):
         for eq in equations:
             try:
                 # SKIP COMPLEX PLOTTING
-                # If equation has 'I' (imaginary), graphing usually fails or is meaningless on Real plane
                 if eq.has(I):
                     continue
 
                 if 'y' in str(eq):
                     y_expr = solve(eq, y)
                     if y_expr:
-                        # Use numpy complex support just in case, but filter later
                         f_y = sympy.lambdify(x, y_expr[0], "numpy") 
                         y_vals = f_y(x_vals)
                         
-                        # Filter out complex results (e.g. sqrt(negative))
                         if np.iscomplexobj(y_vals):
-                            # Set complex parts to NaN so they don't plot
                             y_vals = y_vals.real 
-                            # (Simple hack: better is to mask them, but this prevents crashing)
                         
                         fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='lines', name=f"Eq {i+1}", line=dict(color=colors[i % 3])))
                         
-                        # T-Chart
                         t_x = []
                         t_y = []
                         for val in [-4, -2, 0, 2, 4]:
                             try:
                                 res_y = y_expr[0].subs(x, val)
-                                if res_y.is_real: # Only list real points
+                                if res_y.is_real: 
                                     t_x.append(val)
                                     t_y.append(round(float(res_y), 2))
                             except: pass
@@ -225,7 +211,6 @@ def plot_system_interactive(text_str):
                         i += 1
             except: pass
         
-        # Intersection logic (Skip for now to avoid complex crashes in intersection)
         if len(equations) > 1:
              pass 
 
@@ -274,9 +259,7 @@ with st.sidebar:
             st.rerun()
             
     st.markdown("---")
-    # PARENT MODE TOGGLE
     parent_mode = st.toggle("👨‍👩‍👧 Parent Mode", value=False)
-    
     st.markdown("---")
     show_debug = st.checkbox("🛠️ Engineer Mode", value=False)
 
@@ -288,7 +271,6 @@ with col1:
     if st.session_state.line_prev: 
         st.latex(pretty_print(st.session_state.line_prev))
         
-        # PARENT MODE: REVEAL ANSWER
         if parent_mode:
             if st.button("👁️ Reveal Answer for Line A"):
                 sol_set = get_solution_set(st.session_state.line_prev)
@@ -332,7 +314,7 @@ with col2:
 
 st.markdown("---")
 
-# --- KEYPAD (UPDATED FOR ALGEBRA 2) ---
+# --- KEYPAD (UPDATED) ---
 with st.expander("⌨️ Show Math Keypad", expanded=False):
     st.write("Click a button to add it to the **" + st.session_state.keypad_target + "**.")
     st.radio("Target:", ["Previous Line", "Current Line"], horizontal=True, key="keypad_target", label_visibility="collapsed")
@@ -341,7 +323,7 @@ with st.expander("⌨️ Show Math Keypad", expanded=False):
     # ROW 1
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.button("x²", on_click=add_to_input, args=("^2",))
-    c2.button("√", on_click=add_to_input, args=("sqrt(",)) # NEW: Square Root
+    c2.button("√", on_click=add_to_input, args=("sqrt(",))
     c3.button("(", on_click=add_to_input, args=("(",))
     c4.button(")", on_click=add_to_input, args=(")",))
     c5.button(";", on_click=add_to_input, args=("; ",))
@@ -356,10 +338,60 @@ with st.expander("⌨️ Show Math Keypad", expanded=False):
     c5.button("x", on_click=add_to_input, args=("x",))
     c6.button("y", on_click=add_to_input, args=("y",))
     
-    # ROW 3 (NEW ALGEBRA 2 BUTTONS)
+    # ROW 3
     c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.button("i", on_click=add_to_input, args=("i",))  # Imaginary
-    c2.button("π", on_click=add_to_input, args=("pi",)) # Pi
-    c3.button("e", on_click=add_to_input, args=("e",))  # Euler
-    c4.button("log", on_click=add_to_input, args=("log(",)) # Log
-    c5.button("sin", on_click
+    c1.button("i", on_click=add_to_input, args=("i",)) 
+    c2.button("π", on_click=add_to_input, args=("pi",))
+    c3.button("e", on_click=add_to_input, args=("e",))
+    c4.button("log", on_click=add_to_input, args=("log(",))
+    c5.button("sin", on_click=add_to_input, args=("sin(",))
+    c6.button("cos", on_click=add_to_input, args=("cos(",))
+
+st.markdown("---")
+
+# --- CHECK LOGIC & NEXT STEP ---
+c_check, c_next = st.columns([1, 1])
+
+with c_check:
+    if st.button("Check Logic", type="primary"):
+        line_a = st.session_state.line_prev
+        line_b = st.session_state.line_curr
+        
+        is_valid, status, hint, debug_data = validate_step(line_a, line_b)
+        
+        now = datetime.datetime.now().strftime("%H:%M:%S")
+        st.session_state.history.append({
+            "Time": now, "Input A": line_a, "Input B": line_b, "Result": status, "Hint": hint
+        })
+        
+        if is_valid:
+            st.session_state.step_verified = True 
+            if status == "Valid":
+                st.success("✅ **Perfect Logic!**")
+                st.balloons()
+            elif status == "Unsimplified":
+                st.warning("⚠️ **Correct, but not fully simplified.**")
+                st.info("💡 **Hint:** Perform the arithmetic.")
+            elif status == "Partial":
+                st.warning("⚠️ **Technically Correct, but Incomplete.**")
+        else:
+            st.session_state.step_verified = False
+            st.error("❌ **Logic Break**")
+            if hint and hint != "Logic error.":
+                st.info(f"💡 **Hint:** {hint}")
+                
+        if not is_valid and show_debug:
+            st.markdown("---")
+            st.write("🛠️ **Debug X-Ray:**")
+            st.write(f"**Raw Set A:** `{debug_data.get('Raw Set A')}`")
+            st.write(f"**Raw Set B:** `{debug_data.get('Raw Set B')}`")
+
+with c_next:
+    if st.session_state.step_verified:
+        st.button("⬇️ Next Step (Move Down)", on_click=next_step)
+
+st.markdown("---")
+st.markdown(
+    """<div style='text-align: center; color: #666;'><small>Built by The Logic Lab 🧪 | © 2026 Step-Checker</small></div>""",
+    unsafe_allow_html=True
+)
