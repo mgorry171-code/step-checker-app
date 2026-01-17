@@ -1,18 +1,3 @@
-This is the exact same "Tuple" issue that caused the {(6,)} problem at the very beginning, but now it is happening with Imaginary numbers.
-
-The Problem: The computer solved x^2 + 4 = 0 and found x = 2i and x = -2i. However, it packaged them as tuples: {(-2i,), (2i,)}. When you typed 2i, -2i, you created a set of numbers: {-2i, 2i}. The computer compared Tuples vs. Numbers and said: "These are not the same thing."
-
-The Fix (v5.1): I am adding a "Tuple Flattener" to the brain. If the answer is a single number (like 2i), it will automatically peel off the wrapper so (2i,) becomes just 2i. This fixes both the display (no weird commas) and the validation.
-
-Action:
-Edit app.py.
-
-Delete All and paste this code.
-
-Commit and Refresh.
-
-Python
-
 import streamlit as st
 import sympy
 from sympy import symbols, solve, Eq, latex, simplify, I, pi, E
@@ -395,3 +380,4 @@ st.markdown(
     """<div style='text-align: center; color: #666;'><small>Built by The Logic Lab 🧪 | © 2026 Step-Checker</small></div>""",
     unsafe_allow_html=True
 )
+
