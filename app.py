@@ -7,6 +7,10 @@ import pandas as pd
 import re
 import numpy as np
 import plotly.graph_objects as go
+import requests
+import base64
+from PIL import Image
+from io import BytesIO
 
 # --- SETUP SESSION STATE ---
 if 'line_prev' not in st.session_state:
@@ -30,11 +34,7 @@ def add_to_input(text_to_add):
 def clean_input(text):
     text = text.lower()
     text = re.sub(r'(\d),(\d{3})', r'\1\2', text)
-    
-    # --- THE FIX: 'and' becomes comma ',' (List) instead of semicolon ';' (System) ---
     text = text.replace(" and ", ",") 
-    # --------------------------------------------------------------------------------
-    
     text = text.replace("^", "**")
     text = re.sub(r'(?<![a-z])i(?![a-z])', 'I', text) 
     text = text.replace("+/-", "±")
@@ -234,9 +234,7 @@ def validate_step(line_prev_str, line_curr_str):
         if set_A is None and line_prev_str: return False, "Could not solve Line A", "", debug_info
         if set_B is None: return False, "Could not parse Line B", "", debug_info
 
-        # --- COMPARISON LOGIC ---
         if set_A == set_B: return True, "Valid", "", debug_info
-        
         try:
             list_A = sorted([str(s) for s in set_A])
             list_B = sorted([str(s) for s in set_B])
@@ -250,9 +248,49 @@ def validate_step(line_prev_str, line_curr_str):
     except Exception as e:
         return False, f"Syntax Error: {e}", "", debug_info
 
+# --- NEW: MATHPIX INTEGRATION ---
+def process_image_with_mathpix(image_file, app_id, app_key):
+    """
+    Sends image to Mathpix API and returns the latex string.
+    """
+    try:
+        # 1. Convert Image to Base64
+        image_bytes = image_file.getvalue()
+        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+        data_uri = f"data:image/jpeg;base64,{image_base64}"
+        
+        # 2. Prepare API Request
+        url = "https://api.mathpix.com/v3/text"
+        headers = {
+            "app_id": app_id,
+            "app_key": app_key,
+            "Content-type": "application/json"
+        }
+        data = {
+            "src": data_uri,
+            "formats": ["text", "latex_simplified"],
+            "data_options": {"include_asciimath": True}
+        }
+        
+        # 3. Send to Cloud
+        response = requests.post(url, json=data, headers=headers)
+        response.raise_for_status()
+        
+        # 4. Extract Result
+        result = response.json()
+        if 'latex_simplified' in result:
+            return result['latex_simplified']
+        elif 'text' in result:
+            return result['text']
+        else:
+            return None
+    except Exception as e:
+        st.error(f"OCR Error: {e}")
+        return None
+
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v5.3", page_icon="🧪")
+st.set_page_config(page_title="The Logic Lab v6.0", page_icon="🧪")
 st.title("🧪 The Logic Lab")
 
 with st.sidebar:
@@ -265,10 +303,44 @@ with st.sidebar:
         if st.button("Clear History"):
             st.session_state.history = []
             st.rerun()
+            
+    st.markdown("---")
+    
+    # --- MATHPIX KEYS ---
+    st.subheader("📷 Camera Settings")
+    st.caption("To enable real scanning, enter your Mathpix Keys. Otherwise, we run in Demo Mode.")
+    mp_id = st.text_input("Mathpix App ID", type="password")
+    mp_key = st.text_input("Mathpix App Key", type="password")
+    
     st.markdown("---")
     parent_mode = st.toggle("👨‍👩‍👧 Parent Mode", value=False)
     st.markdown("---")
     show_debug = st.checkbox("🛠️ Engineer Mode", value=False)
+
+# --- CAMERA INPUT SECTION ---
+with st.expander("📷 Scan Handwritten Math", expanded=True):
+    cam_col1, cam_col2 = st.columns([1, 3])
+    with cam_col1:
+        img_file = st.camera_input("Take a photo")
+    with cam_col2:
+        if img_file is not None:
+            st.write("Processing image...")
+            if mp_id and mp_key:
+                # REAL MODE
+                extracted_text = process_image_with_mathpix(img_file, mp_id, mp_key)
+                if extracted_text:
+                    st.session_state.line_prev = extracted_text
+                    st.success(f"Scanned: {extracted_text}")
+                    st.rerun()
+            else:
+                # DEMO MODE
+                st.warning("⚠️ No API Keys found. Running Simulation.")
+                # Simulate a delay and a result
+                st.session_state.line_prev = "3x^2 + 5x - 2 = 0"
+                st.success("Simulated Scan: 3x^2 + 5x - 2 = 0")
+                st.rerun()
+
+st.markdown("---")
 
 col1, col2 = st.columns(2)
 with col1:
@@ -309,7 +381,7 @@ with col1:
                                 st.write(item["label"])
                                 st.dataframe(item["df"], hide_index=True)
             else:
-                st.caption("Could not graph this expression. (Graphs may be hidden for complex numbers)")
+                st.caption("Could not graph this expression.")
 
 with col2:
     st.markdown("### Current Line")
