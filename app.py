@@ -23,6 +23,9 @@ if 'keypad_target' not in st.session_state:
     st.session_state.keypad_target = "Current Line"
 if 'step_verified' not in st.session_state:
     st.session_state.step_verified = False
+# NEW: Track the last processed image to prevent loops
+if 'last_image_bytes' not in st.session_state:
+    st.session_state.last_image_bytes = None
 
 # --- HELPER FUNCTIONS ---
 def add_to_input(text_to_add):
@@ -250,16 +253,10 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- NEW: MATHPIX INTEGRATION ---
 def process_image_with_mathpix(image_file, app_id, app_key):
-    """
-    Sends image to Mathpix API and returns the latex string.
-    """
     try:
-        # 1. Convert Image to Base64
         image_bytes = image_file.getvalue()
         image_base64 = base64.b64encode(image_bytes).decode('utf-8')
         data_uri = f"data:image/jpeg;base64,{image_base64}"
-        
-        # 2. Prepare API Request
         url = "https://api.mathpix.com/v3/text"
         headers = {
             "app_id": app_id,
@@ -271,12 +268,8 @@ def process_image_with_mathpix(image_file, app_id, app_key):
             "formats": ["text", "latex_simplified"],
             "data_options": {"include_asciimath": True}
         }
-        
-        # 3. Send to Cloud
         response = requests.post(url, json=data, headers=headers)
         response.raise_for_status()
-        
-        # 4. Extract Result
         result = response.json()
         if 'latex_simplified' in result:
             return result['latex_simplified']
@@ -290,7 +283,7 @@ def process_image_with_mathpix(image_file, app_id, app_key):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v6.0", page_icon="🧪")
+st.set_page_config(page_title="The Logic Lab v6.1", page_icon="🧪")
 st.title("🧪 The Logic Lab")
 
 with st.sidebar:
@@ -303,42 +296,39 @@ with st.sidebar:
         if st.button("Clear History"):
             st.session_state.history = []
             st.rerun()
-            
     st.markdown("---")
-    
-    # --- MATHPIX KEYS ---
     st.subheader("📷 Camera Settings")
-    st.caption("To enable real scanning, enter your Mathpix Keys. Otherwise, we run in Demo Mode.")
+    st.caption("Enter Keys to enable real scanning. Empty keys = Demo Mode.")
     mp_id = st.text_input("Mathpix App ID", type="password")
     mp_key = st.text_input("Mathpix App Key", type="password")
-    
     st.markdown("---")
     parent_mode = st.toggle("👨‍👩‍👧 Parent Mode", value=False)
     st.markdown("---")
     show_debug = st.checkbox("🛠️ Engineer Mode", value=False)
 
-# --- CAMERA INPUT SECTION ---
+# --- CAMERA INPUT (FIXED NO-LOOP) ---
 with st.expander("📷 Scan Handwritten Math", expanded=True):
     cam_col1, cam_col2 = st.columns([1, 3])
     with cam_col1:
         img_file = st.camera_input("Take a photo")
     with cam_col2:
         if img_file is not None:
-            st.write("Processing image...")
-            if mp_id and mp_key:
-                # REAL MODE
-                extracted_text = process_image_with_mathpix(img_file, mp_id, mp_key)
-                if extracted_text:
-                    st.session_state.line_prev = extracted_text
-                    st.success(f"Scanned: {extracted_text}")
-                    st.rerun()
-            else:
-                # DEMO MODE
-                st.warning("⚠️ No API Keys found. Running Simulation.")
-                # Simulate a delay and a result
-                st.session_state.line_prev = "3x^2 + 5x - 2 = 0"
-                st.success("Simulated Scan: 3x^2 + 5x - 2 = 0")
-                st.rerun()
+            # CHECK: Only process if it's a NEW photo
+            current_bytes = img_file.getvalue()
+            if current_bytes != st.session_state.last_image_bytes:
+                st.session_state.last_image_bytes = current_bytes # Remember this photo
+                
+                st.write("Processing...")
+                if mp_id and mp_key:
+                    extracted_text = process_image_with_mathpix(img_file, mp_id, mp_key)
+                    if extracted_text:
+                        st.session_state.line_prev = extracted_text
+                        st.success(f"Scanned: {extracted_text}")
+                        # No st.rerun() needed - Streamlit updates automatically
+                else:
+                    st.warning("⚠️ No API Keys found. Running Simulation.")
+                    st.session_state.line_prev = "3x^2 + 5x - 2 = 0"
+                    st.success("Simulated Scan: 3x^2 + 5x - 2 = 0")
 
 st.markdown("---")
 
