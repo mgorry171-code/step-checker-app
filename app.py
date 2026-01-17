@@ -1,3 +1,18 @@
+This is the exact same "Tuple" issue that caused the {(6,)} problem at the very beginning, but now it is happening with Imaginary numbers.
+
+The Problem: The computer solved x^2 + 4 = 0 and found x = 2i and x = -2i. However, it packaged them as tuples: {(-2i,), (2i,)}. When you typed 2i, -2i, you created a set of numbers: {-2i, 2i}. The computer compared Tuples vs. Numbers and said: "These are not the same thing."
+
+The Fix (v5.1): I am adding a "Tuple Flattener" to the brain. If the answer is a single number (like 2i), it will automatically peel off the wrapper so (2i,) becomes just 2i. This fixes both the display (no weird commas) and the validation.
+
+Action:
+Edit app.py.
+
+Delete All and paste this code.
+
+Commit and Refresh.
+
+Python
+
 import streamlit as st
 import sympy
 from sympy import symbols, solve, Eq, latex, simplify, I, pi, E
@@ -75,11 +90,23 @@ def pretty_print(math_str):
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
-# --- LOGIC BRAIN 5.0 (Algebra 2 Support) ---
+# --- LOGIC BRAIN 5.1 (Tuple Flattener Fix) ---
 def get_solution_set(text_str):
     x, y = symbols('x y')
     clean = clean_input(text_str)
     try:
+        if "±" in clean:
+            parts = clean.split("±")
+            val = smart_parse(parts[1].strip(), evaluate=True)
+            return sympy.FiniteSet(val, -val)
+        elif "," in clean and "=" not in clean:
+             # List of numbers: "2i, -2i"
+            items = clean.split(",")
+            vals = []
+            for i in items:
+                if i.strip(): vals.append(smart_parse(i.strip(), evaluate=True))
+            return sympy.FiniteSet(*vals)
+
         equations = []
         if ";" in clean:
             raw_eqs = clean.split(";")
@@ -99,12 +126,23 @@ def get_solution_set(text_str):
             expr = equations[0]
             if isinstance(expr, tuple): return sympy.FiniteSet(expr)
             if isinstance(expr, Eq) or not (expr.is_Relational):
-                 if 'y' in str(expr) and 'x' in str(expr): return sympy.FiniteSet(expr) # 2-var relation
+                 if 'y' in str(expr) and 'x' in str(expr): return sympy.FiniteSet(expr)
                  else:
-                     # Solve for x (handles quadratics automatically)
                      if 'x' not in str(expr) and 'y' not in str(expr): return sympy.FiniteSet(expr)
+                     
                      sol = solve(expr, x, set=True)
-                     return sol[1] 
+                     raw_set = sol[1]
+                     
+                     # --- THE TUPLE FLATTENER ---
+                     # Converts {(-2i,), (2i,)} -> {-2i, 2i}
+                     final_vals = []
+                     for item in raw_set:
+                         if isinstance(item, tuple) and len(item) == 1:
+                             final_vals.append(item[0])
+                         else:
+                             final_vals.append(item)
+                     return sympy.FiniteSet(*final_vals)
+                     # ---------------------------
             else:
                 solution = reduce_inequalities(expr, x)
                 return solution.as_set()
@@ -117,17 +155,9 @@ def check_simplification(text):
         expr = smart_parse(clean, evaluate=False)
         if isinstance(expr, Eq): rhs = expr.rhs
         else: rhs = expr
-        
-        # 1. Basic Number or Symbol (x, 5, 3.14)
         if rhs.is_Number or rhs.is_Symbol: return True
-        
-        # 2. Negative Number (-5) is technically Mul(-1, 5)
         if rhs.is_Mul and len(rhs.args) == 2 and rhs.args[0] == -1 and rhs.args[1].is_Number: return True
-        
-        # 3. ALGEBRA 2 UPDATE: Complex Numbers (3 + 4i) are 'Add' but valid
-        if rhs.has(I):
-             return True
-
+        if rhs.has(I): return True
         return False
     except:
         return True
@@ -144,7 +174,6 @@ def plot_system_interactive(text_str):
     try:
         x, y = symbols('x y')
         clean = clean_input(text_str)
-        
         equations = []
         if ";" in clean:
             raw_eqs = clean.split(";")
@@ -167,21 +196,14 @@ def plot_system_interactive(text_str):
         
         for eq in equations:
             try:
-                # SKIP COMPLEX PLOTTING
-                if eq.has(I):
-                    continue
-
+                if eq.has(I): continue
                 if 'y' in str(eq):
                     y_expr = solve(eq, y)
                     if y_expr:
                         f_y = sympy.lambdify(x, y_expr[0], "numpy") 
                         y_vals = f_y(x_vals)
-                        
-                        if np.iscomplexobj(y_vals):
-                            y_vals = y_vals.real 
-                        
+                        if np.iscomplexobj(y_vals): y_vals = y_vals.real 
                         fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='lines', name=f"Eq {i+1}", line=dict(color=colors[i % 3])))
-                        
                         t_x = []
                         t_y = []
                         for val in [-4, -2, 0, 2, 4]:
@@ -191,11 +213,9 @@ def plot_system_interactive(text_str):
                                     t_x.append(val)
                                     t_y.append(round(float(res_y), 2))
                             except: pass
-                        
                         if t_x:
                             df_table = pd.DataFrame({"x": t_x, "y": t_y})
                             table_data_list.append({"label": f"Equation {i+1}: ${latex(eq)}$", "df": df_table})
-                        
                         has_plotted = True
                         i += 1
                 elif 'x' in str(eq):
@@ -210,15 +230,9 @@ def plot_system_interactive(text_str):
                         has_plotted = True
                         i += 1
             except: pass
-        
-        if len(equations) > 1:
-             pass 
-
         if not has_plotted: return None, None
-
         fig.update_layout(xaxis_title="X Axis", yaxis_title="Y Axis", xaxis=dict(range=[-10, 10], showgrid=True, zeroline=True, zerolinewidth=2, zerolinecolor='black'), yaxis=dict(range=[-10, 10], showgrid=True, zeroline=True, zerolinewidth=2, zerolinecolor='black'), height=500, showlegend=True, margin=dict(l=20, r=20, t=30, b=20))
         return fig, table_data_list
-
     except Exception as e:
         return None, None
 
@@ -244,7 +258,7 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v5.0", page_icon="🧪")
+st.set_page_config(page_title="The Logic Lab v5.1", page_icon="🧪")
 st.title("🧪 The Logic Lab")
 
 with st.sidebar:
@@ -257,13 +271,11 @@ with st.sidebar:
         if st.button("Clear History"):
             st.session_state.history = []
             st.rerun()
-            
     st.markdown("---")
     parent_mode = st.toggle("👨‍👩‍👧 Parent Mode", value=False)
     st.markdown("---")
     show_debug = st.checkbox("🛠️ Engineer Mode", value=False)
 
-# --- DISPLAY AREA ---
 col1, col2 = st.columns(2)
 with col1:
     st.markdown("### Previous Line")
@@ -305,8 +317,6 @@ with col1:
             else:
                 st.caption("Could not graph this expression. (Graphs may be hidden for complex numbers)")
 
-    st.caption("For Systems: Use ';' to separate. (e.g. `2x+y=10; x-y=4`)")
-
 with col2:
     st.markdown("### Current Line")
     st.text_input("Line B", key="line_curr", label_visibility="collapsed")
@@ -314,13 +324,11 @@ with col2:
 
 st.markdown("---")
 
-# --- KEYPAD (UPDATED) ---
 with st.expander("⌨️ Show Math Keypad", expanded=False):
     st.write("Click a button to add it to the **" + st.session_state.keypad_target + "**.")
     st.radio("Target:", ["Previous Line", "Current Line"], horizontal=True, key="keypad_target", label_visibility="collapsed")
     st.write("") 
     
-    # ROW 1
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.button("x²", on_click=add_to_input, args=("^2",))
     c2.button("√", on_click=add_to_input, args=("sqrt(",))
@@ -329,7 +337,6 @@ with st.expander("⌨️ Show Math Keypad", expanded=False):
     c5.button(";", on_click=add_to_input, args=("; ",))
     c6.button("÷", on_click=add_to_input, args=("/",))
 
-    # ROW 2
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.button(" < ", on_click=add_to_input, args=("<",))
     c2.button("\>", on_click=add_to_input, args=(">",)) 
@@ -338,7 +345,6 @@ with st.expander("⌨️ Show Math Keypad", expanded=False):
     c5.button("x", on_click=add_to_input, args=("x",))
     c6.button("y", on_click=add_to_input, args=("y",))
     
-    # ROW 3
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.button("i", on_click=add_to_input, args=("i",)) 
     c2.button("π", on_click=add_to_input, args=("pi",))
@@ -349,21 +355,16 @@ with st.expander("⌨️ Show Math Keypad", expanded=False):
 
 st.markdown("---")
 
-# --- CHECK LOGIC & NEXT STEP ---
 c_check, c_next = st.columns([1, 1])
-
 with c_check:
     if st.button("Check Logic", type="primary"):
         line_a = st.session_state.line_prev
         line_b = st.session_state.line_curr
-        
         is_valid, status, hint, debug_data = validate_step(line_a, line_b)
-        
         now = datetime.datetime.now().strftime("%H:%M:%S")
         st.session_state.history.append({
             "Time": now, "Input A": line_a, "Input B": line_b, "Result": status, "Hint": hint
         })
-        
         if is_valid:
             st.session_state.step_verified = True 
             if status == "Valid":
@@ -379,7 +380,6 @@ with c_check:
             st.error("❌ **Logic Break**")
             if hint and hint != "Logic error.":
                 st.info(f"💡 **Hint:** {hint}")
-                
         if not is_valid and show_debug:
             st.markdown("---")
             st.write("🛠️ **Debug X-Ray:**")
