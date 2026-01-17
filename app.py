@@ -30,7 +30,11 @@ def add_to_input(text_to_add):
 def clean_input(text):
     text = text.lower()
     text = re.sub(r'(\d),(\d{3})', r'\1\2', text)
-    text = text.replace(" and ", ";")
+    
+    # --- THE FIX: 'and' becomes comma ',' (List) instead of semicolon ';' (System) ---
+    text = text.replace(" and ", ",") 
+    # --------------------------------------------------------------------------------
+    
     text = text.replace("^", "**")
     text = re.sub(r'(?<![a-z])i(?![a-z])', 'I', text) 
     text = text.replace("+/-", "±")
@@ -72,21 +76,16 @@ def pretty_print(math_str):
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
-# --- LOGIC BRAIN 5.2 (Robust Comparison) ---
+# --- LOGIC BRAIN 5.3 ---
 def flatten_set(s):
-    """
-    Takes a SymPy FiniteSet and ensures all elements are numbers, not tuples.
-    { (2,), (5,) } -> { 2, 5 }
-    """
     if s is None: return set()
     flat_items = []
     for item in s:
-        # Check for Python tuple OR SymPy Tuple
         if isinstance(item, (tuple, sympy.Tuple)):
             if len(item) == 1:
                 flat_items.append(item[0])
             else:
-                flat_items.append(item) # Keep coordinates (x,y) as tuples
+                flat_items.append(item) 
         else:
             flat_items.append(item)
     return sympy.FiniteSet(*flat_items)
@@ -235,12 +234,9 @@ def validate_step(line_prev_str, line_curr_str):
         if set_A is None and line_prev_str: return False, "Could not solve Line A", "", debug_info
         if set_B is None: return False, "Could not parse Line B", "", debug_info
 
-        # --- THE FIX: ROBUST COMPARISON ---
-        # 1. Direct Set Match
+        # --- COMPARISON LOGIC ---
         if set_A == set_B: return True, "Valid", "", debug_info
         
-        # 2. "String Match" Fallback (Ignores internal types)
-        # Convert {2*I, -2*I} to sorted strings ["-2*I", "2*I"]
         try:
             list_A = sorted([str(s) for s in set_A])
             list_B = sorted([str(s) for s in set_B])
@@ -256,7 +252,7 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v5.2", page_icon="🧪")
+st.set_page_config(page_title="The Logic Lab v5.3", page_icon="🧪")
 st.title("🧪 The Logic Lab")
 
 with st.sidebar:
