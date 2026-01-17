@@ -32,10 +32,9 @@ def clean_input(text):
     text = re.sub(r'(\d),(\d{3})', r'\1\2', text)
     text = text.replace(" and ", ";")
     text = text.replace("^", "**")
-    # Convert 'i' to 'I' (Imaginary) but NOT inside words like 'sin', 'pi', 'limit'
     text = re.sub(r'(?<![a-z])i(?![a-z])', 'I', text) 
     text = text.replace("+/-", "±")
-    text = text.replace("√", "sqrt") # Handle square root symbol
+    text = text.replace("√", "sqrt")
     text = text.replace("%", "/100")
     text = text.replace(" of ", "*")
     text = text.replace("=<", "<=").replace("=>", ">=")
@@ -44,9 +43,7 @@ def clean_input(text):
 def smart_parse(text, evaluate=True):
     transformations = (standard_transformations + (implicit_multiplication_application,))
     try:
-        # Define extra local variables for 'e' and 'pi' if user types them as text
         local_dict = {'e': E, 'pi': pi}
-        
         if "<=" in text or ">=" in text or "<" in text or ">" in text:
             return parse_expr(text, transformations=transformations, evaluate=evaluate, local_dict=local_dict)
         elif "=" in text:
@@ -75,7 +72,25 @@ def pretty_print(math_str):
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
-# --- LOGIC BRAIN 5.1 (Tuple Flattener Fix) ---
+# --- LOGIC BRAIN 5.2 (Robust Comparison) ---
+def flatten_set(s):
+    """
+    Takes a SymPy FiniteSet and ensures all elements are numbers, not tuples.
+    { (2,), (5,) } -> { 2, 5 }
+    """
+    if s is None: return set()
+    flat_items = []
+    for item in s:
+        # Check for Python tuple OR SymPy Tuple
+        if isinstance(item, (tuple, sympy.Tuple)):
+            if len(item) == 1:
+                flat_items.append(item[0])
+            else:
+                flat_items.append(item) # Keep coordinates (x,y) as tuples
+        else:
+            flat_items.append(item)
+    return sympy.FiniteSet(*flat_items)
+
 def get_solution_set(text_str):
     x, y = symbols('x y')
     clean = clean_input(text_str)
@@ -83,14 +98,13 @@ def get_solution_set(text_str):
         if "±" in clean:
             parts = clean.split("±")
             val = smart_parse(parts[1].strip(), evaluate=True)
-            return sympy.FiniteSet(val, -val)
+            return flatten_set(sympy.FiniteSet(val, -val))
         elif "," in clean and "=" not in clean:
-             # List of numbers: "2i, -2i"
             items = clean.split(",")
             vals = []
             for i in items:
                 if i.strip(): vals.append(smart_parse(i.strip(), evaluate=True))
-            return sympy.FiniteSet(*vals)
+            return flatten_set(sympy.FiniteSet(*vals))
 
         equations = []
         if ";" in clean:
@@ -106,31 +120,19 @@ def get_solution_set(text_str):
 
         if len(equations) > 1:
             sol = solve(equations, (x, y), set=True)
-            return sol[1] 
+            return flatten_set(sol[1])
         else:
             expr = equations[0]
-            if isinstance(expr, tuple): return sympy.FiniteSet(expr)
+            if isinstance(expr, tuple): return flatten_set(sympy.FiniteSet(expr))
             if isinstance(expr, Eq) or not (expr.is_Relational):
-                 if 'y' in str(expr) and 'x' in str(expr): return sympy.FiniteSet(expr)
+                 if 'y' in str(expr) and 'x' in str(expr): return flatten_set(sympy.FiniteSet(expr))
                  else:
-                     if 'x' not in str(expr) and 'y' not in str(expr): return sympy.FiniteSet(expr)
-                     
+                     if 'x' not in str(expr) and 'y' not in str(expr): return flatten_set(sympy.FiniteSet(expr))
                      sol = solve(expr, x, set=True)
-                     raw_set = sol[1]
-                     
-                     # --- THE TUPLE FLATTENER ---
-                     # Converts {(-2i,), (2i,)} -> {-2i, 2i}
-                     final_vals = []
-                     for item in raw_set:
-                         if isinstance(item, tuple) and len(item) == 1:
-                             final_vals.append(item[0])
-                         else:
-                             final_vals.append(item)
-                     return sympy.FiniteSet(*final_vals)
-                     # ---------------------------
+                     return flatten_set(sol[1])
             else:
                 solution = reduce_inequalities(expr, x)
-                return solution.as_set()
+                return flatten_set(solution.as_set())
     except Exception as e:
         return None
 
@@ -233,7 +235,18 @@ def validate_step(line_prev_str, line_curr_str):
         if set_A is None and line_prev_str: return False, "Could not solve Line A", "", debug_info
         if set_B is None: return False, "Could not parse Line B", "", debug_info
 
+        # --- THE FIX: ROBUST COMPARISON ---
+        # 1. Direct Set Match
         if set_A == set_B: return True, "Valid", "", debug_info
+        
+        # 2. "String Match" Fallback (Ignores internal types)
+        # Convert {2*I, -2*I} to sorted strings ["-2*I", "2*I"]
+        try:
+            list_A = sorted([str(s) for s in set_A])
+            list_B = sorted([str(s) for s in set_B])
+            if list_A == list_B:
+                 return True, "Valid", "", debug_info
+        except: pass
         
         hint, internal_debug = diagnose_error(set_A, set_B)
         return False, "Invalid", hint, debug_info
@@ -243,7 +256,7 @@ def validate_step(line_prev_str, line_curr_str):
 
 # --- WEB INTERFACE ---
 
-st.set_page_config(page_title="The Logic Lab v5.1", page_icon="🧪")
+st.set_page_config(page_title="The Logic Lab v5.2", page_icon="🧪")
 st.title("🧪 The Logic Lab")
 
 with st.sidebar:
@@ -380,4 +393,3 @@ st.markdown(
     """<div style='text-align: center; color: #666;'><small>Built by The Logic Lab 🧪 | © 2026 Step-Checker</small></div>""",
     unsafe_allow_html=True
 )
-
