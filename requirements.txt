@@ -1,4 +1,6 @@
 streamlit
 sympy
 plotly
+requests
+Pillow
 
